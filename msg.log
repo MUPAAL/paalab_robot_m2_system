@@ -1,49 +1,152 @@
-2026-02-25 15:09:51,872 [INFO] [CAM1] MJPEG HTTP server started on port 8080
-2026-02-25 15:09:56,881 [INFO] [CAM2] MJPEG HTTP server started on port 8081
-2026-02-25 15:09:56,882 [INFO] [CAM1] Connecting to camera at 192.168.1.101...
-2026-02-25 15:09:56,883 [INFO] [CAM2] Connecting to camera at 192.168.1.102...
-2026-02-25 15:09:56,883 [INFO] Camera streamer running. Streams:
-2026-02-25 15:09:56,883 [INFO]   CAM1: http://0.0.0.0:8080  (source: 192.168.1.101)
-2026-02-25 15:09:56,883 [INFO]   CAM2: http://0.0.0.0:8081  (source: 192.168.1.102)
-2026-02-25 15:09:56,883 [INFO] Local display disabled. Press Ctrl+C to stop.
-2026-02-25 15:10:08,385 [ERROR] [CAM2] Camera connection failed: No available devices. Retrying in 2s...
-2026-02-25 15:10:08,388 [ERROR] [CAM1] Camera connection failed: No available devices. Retrying in 2s...
-2026-02-25 15:10:10,394 [INFO] [CAM2] Connecting to camera at 192.168.1.102...
-2026-02-25 15:10:10,394 [INFO] [CAM1] Connecting to camera at 192.168.1.101...
-2026-02-25 15:10:17,377 [INFO] Signal 15 received, starting graceful shutdown...
-2026-02-25 15:10:17,378 [INFO] Shutting down camera streamer...
-2026-02-25 15:10:17,809 [INFO] Signal 2 received, starting graceful shutdown...
-2026-02-25 15:10:17,809 [INFO] Signal 15 received, starting graceful shutdown...
-2026-02-25 15:10:17,809 [INFO] Shutting down camera streamer...
-2026-02-25 15:10:19,698 [INFO] Signal 2 received, starting graceful shutdown...
-2026-02-25 15:10:19,698 [INFO] Signal 15 received, starting graceful shutdown...
-2026-02-25 15:10:19,698 [INFO] Shutting down camera streamer...
-2026-02-25 15:24:17,707 [INFO] [CAM1] MJPEG HTTP server started on port 8080
-2026-02-25 15:24:52,721 [INFO] [CAM2] MJPEG HTTP server started on port 8081
-2026-02-25 15:24:52,722 [INFO] [CAM1] Connecting to camera at 10.95.76.10...
-2026-02-25 15:24:52,722 [INFO] [CAM2] Connecting to camera at 10.95.76.11...
-2026-02-25 15:24:52,723 [INFO] Camera streamer running. Streams:
-2026-02-25 15:24:52,723 [INFO]   CAM1: http://0.0.0.0:8080  (source: 10.95.76.10)
-2026-02-25 15:24:52,723 [INFO]   CAM2: http://0.0.0.0:8081  (source: 10.95.76.11)
-2026-02-25 15:24:52,723 [INFO] Local display disabled. Press Ctrl+C to stop.
-2026-02-25 15:25:14,739 [ERROR] [CAM1] Camera connection failed: Failed to find device after booting, error message: X_LINK_DEVICE_NOT_FOUND. Retrying in 2s...
-2026-02-25 15:25:14,743 [INFO] [HTTP] Client connected: ('127.0.0.1', 49904)
-2026-02-25 15:25:14,745 [ERROR] [CAM2] Camera connection failed: module 'depthai.node' has no attribute 'XLinkOut'. Retrying in 2s...
-2026-02-25 15:25:16,744 [INFO] [CAM1] Connecting to camera at 10.95.76.10...
-2026-02-25 15:25:16,761 [INFO] [CAM2] Connecting to camera at 10.95.76.11...
-2026-02-25 15:25:38,409 [ERROR] [CAM1] Camera connection failed: module 'depthai.node' has no attribute 'XLinkOut'. Retrying in 4s...
-2026-02-25 15:25:38,409 [ERROR] [CAM2] Camera connection failed: Failed to find device after booting, error message: X_LINK_DEVICE_NOT_FOUND. Retrying in 4s...
-2026-02-25 15:25:42,427 [INFO] [CAM2] Connecting to camera at 10.95.76.11...
-2026-02-25 15:25:42,427 [INFO] [CAM1] Connecting to camera at 10.95.76.10...
-2026-02-25 15:25:59,386 [ERROR] [CAM1] Camera connection failed: Couldn't write data to stream: '__bootloader' (X_LINK_ERROR). Retrying in 8s...
-2026-02-25 15:25:59,386 [ERROR] [CAM2] Camera connection failed: module 'depthai.node' has no attribute 'XLinkOut'. Retrying in 8s...
-2026-02-25 15:26:07,392 [INFO] [CAM1] Connecting to camera at 10.95.76.10...
-2026-02-25 15:26:07,402 [INFO] [CAM2] Connecting to camera at 10.95.76.11...
-2026-02-25 15:26:29,455 [ERROR] [CAM2] Camera connection failed: module 'depthai.node' has no attribute 'XLinkOut'. Retrying in 16s...
-2026-02-25 15:26:29,455 [ERROR] [CAM1] Camera connection failed: Failed to find device after booting, error message: X_LINK_DEVICE_NOT_FOUND. Retrying in 16s...
-2026-02-25 15:26:40,232 [INFO] Signal 2 received, starting graceful shutdown...
-2026-02-25 15:26:40,232 [INFO] Shutting down camera streamer...
-2026-02-25 15:26:40,234 [INFO] Signal 15 received, starting graceful shutdown...
-2026-02-25 15:26:40,234 [INFO] Shutting down camera streamer...
-2026-02-25 15:26:40,378 [INFO] Signal 15 received, starting graceful shutdown...
-2026-02-25 15:26:40,378 [INFO] Shutting down camera streamer...
+(temp) paalab@test-164129 00_robot_side % python main.py
+
+========================================
+   Farm Robot — Robot-side Launcher
+========================================
+  1. Local control (serial only)
+  2. Local control + camera stream
+  3. Remote TCP control
+  4. Remote TCP + camera stream
+
+  q. Quit
+========================================
+Select [1-4 / q]: 1
+2026-02-25 16:07:44,775 [INFO] Selected: [1] Local control (serial only)
+
+>>> Starting: Local control (serial only)
+
+2026-02-25 16:07:44,775 [INFO] Starting: local_controller.py
+2026-02-25 16:07:44,779 [INFO] Running: local_controller.py — press Ctrl+C to stop all
+2026-02-25 16:07:44,965 [INFO] Serial port opened: /dev/cu.usbmodem2301 @ 115200 baud
+2026-02-25 16:07:44,965 [INFO] Key repeat thread started, rate: 10Hz
+2026-02-25 16:07:44,965 [INFO] Local controller started (wasd to move, space to stop, Enter to toggle state, q to quit)
+2026-02-25 16:07:44,965 [INFO] Serial port: /dev/cu.usbmodem2301
+2026-02-25 16:07:44,965 [INFO] NOTE: Do NOT start robot_receiver.py at the same time (serial port conflict)
+2026-02-25 16:07:44,995 [WARNING] This process is not trusted! Input event monitoring will not be possible until it is added to accessibility clients.
+2026-02-25 16:07:50,365 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:07:51,293 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:07:53,549 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:07:54,973 [INFO] Enter key pressed -> sending state toggle command
+
+   2026-02-25 16:07:58,157 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:00,636 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:02,205 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:03,068 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:03,781 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:04,365 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:05,780 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:06,540 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:07,108 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:07,924 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:08,677 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,178 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,262 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,346 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,430 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,514 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,597 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:09,681 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:10,364 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:11,004 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:11,772 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:12,692 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:13,660 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:14,828 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:15,468 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:18,180 [INFO] Key pressed: 'w' -> sending 'w'
+w2026-02-25 16:08:18,244 [WARNING] Emergency stop triggered! Sending space to serial port
+2026-02-25 16:08:18,244 [INFO] All keys released, emergency stop sent
+2026-02-25 16:08:19,644 [INFO] Enter key pressed -> sending state toggle command
+
+2026-02-25 16:08:20,237 [INFO] Key pressed: 's' -> sending 's'
+s2026-02-25 16:08:20,349 [WARNING] Emergency stop triggered! Sending space to serial port
+2026-02-25 16:08:20,349 [INFO] All keys released, emergency stop sent
+2026-02-25 16:08:20,588 [INFO] Key pressed: 'w' -> sending 'w'
+w2026-02-25 16:08:20,677 [WARNING] Emergency stop triggered! Sending space to serial port
+2026-02-25 16:08:20,677 [INFO] All keys released, emergency stop sent
+2026-02-25 16:08:20,812 [INFO] Key pressed: 's' -> sending 's'
+s2026-02-25 16:08:20,925 [WARNING] Emergency stop triggered! Sending space to serial port
+2026-02-25 16:08:20,925 [INFO] All keys released, emergency stop sent
+        2026-02-25 16:08:23,212 [INFO] Quit key 'q' pressed, exiting...
+q2026-02-25 16:08:23,225 [INFO] Keyboard listener stopped
+2026-02-25 16:08:23,225 [INFO] Shutting down local controller...
+2026-02-25 16:08:23,226 [WARNING] Emergency stop triggered! Sending space to serial port
+2026-02-25 16:08:23,226 [INFO] Final emergency stop sent
+2026-02-25 16:08:23,292 [INFO] Serial port closed
+2026-02-25 16:08:23,292 [INFO] Local controller shut down
+2026-02-25 16:08:23,408 [INFO] local_controller.py exited (code 0), terminating others...
+2026-02-25 16:08:23,409 [INFO] Terminating all child processes...
+
+========================================
+   Farm Robot — Robot-side Launcher
+========================================
+  1. Local control (serial only)
+  2. Local control + camera stream
+  3. Remote TCP control
+  4. Remote TCP + camera stream
+
+  q. Quit
+========================================
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option '', enter 1-4 or q
+Select [1-4 / q]:   Invalid option 'w', enter 1-4 or q
+Select [1-4 / q]: q
+  Invalid option 'sws        qq', enter 1-4 or q
+Select [1-4 / q]: q
+2026-02-25 16:08:27,567 [INFO] Launcher exiting
+(temp) paalab@test-164129 00_robot_side % 
