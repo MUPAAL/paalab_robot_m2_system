@@ -1,5 +1,0 @@
-2026-02-24 15:59:17,713 [ERROR] 串口打开失败 [/dev/ttyACM0]: [Errno 2] could not open port /dev/ttyACM0: [Errno 2] No such file or directory: '/dev/ttyACM0'
-2026-02-24 15:59:17,713 [ERROR] 机器人端运行出错: [Errno 2] could not open port /dev/ttyACM0: [Errno 2] No such file or directory: '/dev/ttyACM0'
-2026-02-24 15:59:17,713 [INFO] 正在关闭机器人端…
-2026-02-24 15:59:17,713 [INFO] 看门狗已停止
-2026-02-24 15:59:17,713 [INFO] 机器人端已关闭
