@@ -3,7 +3,7 @@ Robot-side local keyboard controller.
 Directly controls Feather M4 CAN via serial (no TCP required).
 
 Usage:
-    export FEATHER_PORT=/dev/cu.usbmodem14201   # optional override
+    export FEATHER_PORT=/dev/cu.usbmodem2301   # optional override
     cd m2_system/00_robot_side
     python local_controller.py
 

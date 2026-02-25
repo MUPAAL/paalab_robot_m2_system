@@ -26,7 +26,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(f"log/{_py_name}.log", encoding="utf-8"),
+        logging.FileHandler(f"log/robot_{_py_name}.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
