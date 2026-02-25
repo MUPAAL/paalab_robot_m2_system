@@ -45,7 +45,9 @@ class HelloMainLoopApp:
         if self.amiga_tpdo1.state != AmigaControlState.STATE_AUTO_ACTIVE:
             self.cmd_speed = 0.0
             self.cmd_ang_rate = 0.0
-            self.request_state = AmigaControlState.STATE_AUTO_READY
+            # Don't override a pending ACTIVE request
+            if self.request_state != AmigaControlState.STATE_AUTO_ACTIVE:
+                self.request_state = AmigaControlState.STATE_AUTO_READY
         # print(self.amiga_tpdo1, end="\r")
 
     def parse_wasd_cmd(self, char):

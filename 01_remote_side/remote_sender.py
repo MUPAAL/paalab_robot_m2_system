@@ -63,6 +63,9 @@ class RemoteSender:
         self._heartbeat_thread: threading.Thread | None = None
         self._repeat_thread: threading.Thread | None = None
 
+        # Enter key held state (suppress OS key-repeat events)
+        self._enter_held: bool = False
+
     # ── Network connection ─────────────────────────────────
 
     def connect(self) -> None:
@@ -139,8 +142,10 @@ class RemoteSender:
             return
 
         if char == "\r":
-            logger.info("Enter key pressed -> sending state toggle command")
-            self._send("\r")
+            if not self._enter_held:           # 只在首次按下时发送，屏蔽 OS 按键重复
+                self._enter_held = True
+                logger.info("Enter key pressed -> sending state toggle command")
+                self._send("\r")
             return
 
         if char in CONTROL_KEYS:
@@ -156,6 +161,10 @@ class RemoteSender:
         """Key release callback."""
         char = self._key_to_char(key)
         if char is None:
+            return
+
+        if char == "\r":
+            self._enter_held = False
             return
 
         if char in CONTROL_KEYS:
