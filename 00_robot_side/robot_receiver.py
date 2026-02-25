@@ -1,9 +1,10 @@
 """
-机器人端主程序
-TCP 服务端：单连接模式，接收键盘指令 + 心跳，转发到 Feather M4 CAN 串口
+Robot-side main program.
+TCP server: single-connection mode, receives keyboard commands + heartbeats,
+forwards to Feather M4 CAN via serial port.
 
-启动方式：
-    export FEATHER_PORT=/dev/cu.usbmodem14201   # macOS，可选
+Usage:
+    export FEATHER_PORT=/dev/cu.usbmodem14201   # macOS, optional
     python robot_receiver.py
 """
 
@@ -23,13 +24,14 @@ from config import (
 from serial_writer import SerialWriter
 from watchdog import Watchdog
 
-# ── 日志配置 ──────────────────────────────────────────────
+# ── Logging configuration ──────────────────────────────────
 _py_name = Path(__file__).stem
+Path("log").mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(f"{_py_name}.log", encoding="utf-8"),
+        logging.FileHandler(f"log/{_py_name}.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 class RobotReceiver:
-    """TCP 服务端：接收远程键盘指令并转发到串口"""
+    """TCP server: receives remote keyboard commands and forwards them to the serial port."""
 
     def __init__(self) -> None:
         self._serial = SerialWriter()
@@ -48,33 +50,33 @@ class RobotReceiver:
         self._server_sock: socket.socket | None = None
         self._running = False
 
-    # ── 初始化 ────────────────────────────────────────────
+    # ── Initialization ─────────────────────────────────────
 
     def setup(self) -> None:
-        """打开串口，创建 TCP 服务端 socket"""
+        """Open the serial port and create the TCP server socket."""
         self._serial.open()
         self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_sock.bind((TCP_HOST, TCP_PORT))
-        self._server_sock.listen(1)   # 单连接模式
-        logger.info(f"TCP 服务端已启动，监听 {TCP_HOST}:{TCP_PORT}")
-        logger.info(f"串口: {FEATHER_PORT}，看门狗超时: {WATCHDOG_TIMEOUT}s")
+        self._server_sock.listen(1)   # single-connection mode
+        logger.info(f"TCP server started, listening on {TCP_HOST}:{TCP_PORT}")
+        logger.info(f"Serial port: {FEATHER_PORT}, watchdog timeout: {WATCHDOG_TIMEOUT}s")
 
-    # ── 主循环 ────────────────────────────────────────────
+    # ── Main loop ──────────────────────────────────────────
 
     def run(self) -> None:
-        """主循环：持续等待客户端连接，断开后重新等待"""
+        """Main loop: wait for client connections; restart after each disconnect."""
         self._running = True
         while self._running:
-            logger.info("等待远程端连接…")
+            logger.info("Waiting for remote client connection...")
             try:
                 client_sock, addr = self._server_sock.accept()
             except OSError as e:
                 if self._running:
-                    logger.error(f"accept() 失败: {e}")
+                    logger.error(f"accept() failed: {e}")
                 break
 
-            logger.info(f"远程端已连接: {addr}")
+            logger.info(f"Remote client connected: {addr}")
             self._watchdog.start()
             try:
                 self._handle_client(client_sock)
@@ -82,66 +84,66 @@ class RobotReceiver:
                 self._watchdog.stop()
                 self._serial.emergency_stop()
                 client_sock.close()
-                logger.info(f"远程端已断开: {addr}，已发送急停")
+                logger.info(f"Remote client disconnected: {addr}, emergency stop sent")
 
     def _handle_client(self, sock: socket.socket) -> None:
-        """处理单个客户端连接，逐字节读取并分发指令"""
+        """Handle a single client connection; read one byte at a time and dispatch."""
         while True:
             try:
                 data = sock.recv(1)
             except OSError as e:
-                logger.warning(f"recv 异常，连接中断: {e}")
+                logger.warning(f"recv() error, connection lost: {e}")
                 break
 
             if not data:
-                # TCP 正常关闭（recv 返回空字节）
-                logger.info("远程端正常关闭连接")
+                # TCP graceful close (recv returns empty bytes)
+                logger.info("Remote client closed connection gracefully")
                 break
 
             char = data.decode("utf-8", errors="ignore")
             self._dispatch(char)
 
     def _dispatch(self, char: str) -> None:
-        """根据收到的字符分发处理逻辑"""
+        """Dispatch the received character to the appropriate handler."""
         if char == HEARTBEAT_CHAR:
-            # 心跳：只重置看门狗，不写串口
+            # Heartbeat: reset watchdog only, do NOT write to serial
             self._watchdog.reset()
-            logger.debug("收到心跳 H，看门狗已重置")
+            logger.debug("Heartbeat 'H' received, watchdog reset")
         else:
-            # 控制指令：重置看门狗 + 写串口（serial_writer 内部做白名单过滤）
+            # Control command: reset watchdog + write to serial (whitelist enforced inside serial_writer)
             self._watchdog.reset()
             self._serial.write_command(char)
-            logger.info(f"收到指令: {repr(char)}，已写入串口")
+            logger.info(f"Command received: {repr(char)}, written to serial")
 
-    # ── 看门狗超时回调 ────────────────────────────────────
+    # ── Watchdog timeout callback ──────────────────────────
 
     def _on_watchdog_timeout(self) -> None:
-        """看门狗超时时触发急停（在定时器线程中执行）"""
+        """Trigger emergency stop on watchdog timeout (runs in timer thread)."""
         self._serial.emergency_stop()
 
-    # ── 优雅关闭 ──────────────────────────────────────────
+    # ── Graceful shutdown ──────────────────────────────────
 
     def shutdown(self) -> None:
-        """优雅关闭：停止主循环，关闭 socket 和串口"""
-        logger.info("正在关闭机器人端…")
+        """Graceful shutdown: stop the main loop, close socket and serial port."""
+        logger.info("Shutting down robot receiver...")
         self._running = False
         if self._server_sock:
             try:
                 self._server_sock.close()
             except OSError as e:
-                logger.warning(f"关闭服务端 socket 时出错: {e}")
+                logger.warning(f"Error closing server socket: {e}")
         self._watchdog.stop()
         self._serial.close()
-        logger.info("机器人端已关闭")
+        logger.info("Robot receiver shut down")
 
 
-# ── 入口 ──────────────────────────────────────────────────
+# ── Entry point ────────────────────────────────────────────
 
 def main() -> None:
     receiver = RobotReceiver()
 
     def _signal_handler(signum, frame):
-        logger.info(f"收到信号 {signum}，开始优雅关闭…")
+        logger.info(f"Signal {signum} received, starting graceful shutdown...")
         receiver.shutdown()
         sys.exit(0)
 
@@ -152,7 +154,7 @@ def main() -> None:
         receiver.setup()
         receiver.run()
     except Exception as e:
-        logger.error(f"机器人端运行出错: {e}")
+        logger.error(f"Robot receiver encountered an error: {e}")
         raise
     finally:
         receiver.shutdown()

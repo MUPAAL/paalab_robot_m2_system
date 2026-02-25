@@ -1,7 +1,7 @@
 """
-看门狗定时器
-客户端连接时 start()，每条消息调用 reset()，断开时 stop()
-超时未收到消息则自动触发急停回调
+Watchdog timer.
+Call start() on client connect, reset() on every message, stop() on disconnect.
+If no reset() is received within the timeout, the emergency-stop callback fires automatically.
 """
 
 import logging
@@ -11,13 +11,14 @@ from typing import Callable
 
 from config import WATCHDOG_TIMEOUT
 
-# ── 日志配置 ──────────────────────────────────────────────
+# ── Logging configuration ──────────────────────────────────
 _py_name = Path(__file__).stem
+Path("log").mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(f"{_py_name}.log", encoding="utf-8"),
+        logging.FileHandler(f"log/{_py_name}.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
@@ -26,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 class Watchdog:
     """
-    超时看门狗
-    若 timeout 秒内未收到 reset()，自动调用 on_timeout 回调（急停）
+    Timeout watchdog.
+    If reset() is not called within `timeout` seconds, on_timeout callback is invoked (emergency stop).
     """
 
     def __init__(self, timeout: float = WATCHDOG_TIMEOUT, on_timeout: Callable = None) -> None:
@@ -38,14 +39,14 @@ class Watchdog:
         self._active = False
 
     def start(self) -> None:
-        """启动看门狗（客户端连接时调用）"""
+        """Start the watchdog (call when client connects)."""
         with self._lock:
             self._active = True
             self._schedule()
-        logger.info(f"看门狗已启动，超时时间: {self._timeout}s")
+        logger.info(f"Watchdog started, timeout: {self._timeout}s")
 
     def reset(self) -> None:
-        """重置超时计时（收到任意有效消息时调用）"""
+        """Reset the timeout timer (call on every valid message received)."""
         with self._lock:
             if not self._active:
                 return
@@ -53,32 +54,32 @@ class Watchdog:
             self._schedule()
 
     def stop(self) -> None:
-        """停止看门狗（客户端正常断开时调用，不触发急停）"""
+        """Stop the watchdog (call on clean client disconnect; does NOT trigger emergency stop)."""
         with self._lock:
             self._active = False
             self._cancel()
-        logger.info("看门狗已停止")
+        logger.info("Watchdog stopped")
 
     def _schedule(self) -> None:
-        """内部：创建新定时器（必须在 _lock 保护下调用）"""
+        """Internal: create a new timer (must be called under _lock)."""
         self._timer = threading.Timer(self._timeout, self._trigger)
         self._timer.daemon = True
         self._timer.start()
 
     def _cancel(self) -> None:
-        """内部：取消当前定时器（必须在 _lock 保护下调用）"""
+        """Internal: cancel the current timer (must be called under _lock)."""
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
 
     def _trigger(self) -> None:
-        """内部：超时触发，调用急停回调"""
-        logger.warning(f"看门狗超时！{self._timeout}s 内未收到消息，触发急停")
+        """Internal: fired on timeout; invokes the emergency-stop callback."""
+        logger.warning(f"Watchdog timeout! No message received for {self._timeout}s, triggering emergency stop")
         try:
             self._on_timeout()
         except Exception as e:
-            logger.error(f"急停回调执行出错: {e}")
+            logger.error(f"Emergency stop callback raised an exception: {e}")
 
     @staticmethod
     def _default_timeout_handler() -> None:
-        logger.error("看门狗超时：未设置急停回调！")
+        logger.error("Watchdog timeout: no emergency stop callback configured!")

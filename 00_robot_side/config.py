@@ -1,14 +1,14 @@
 """
-机器人端配置
-所有参数支持环境变量覆盖
+Robot-side configuration.
+All parameters can be overridden via environment variables.
 """
 
 import os
 import platform
 
-# ── 串口配置 ──────────────────────────────────────────────
+# ── Serial port configuration ──────────────────────────────
 def _default_serial_port() -> str:
-    """根据操作系统返回默认串口路径"""
+    """Return the default serial port path based on the current OS."""
     system = platform.system()
     if system == "Darwin":   # macOS
         return "/dev/cu.usbmodem14201"
@@ -19,13 +19,30 @@ FEATHER_PORT: str = os.environ.get("FEATHER_PORT", _default_serial_port())
 SERIAL_BAUD: int = int(os.environ.get("SERIAL_BAUD", "115200"))
 SERIAL_TIMEOUT: float = float(os.environ.get("SERIAL_TIMEOUT", "1.0"))
 
-# ── TCP 服务端配置 ─────────────────────────────────────────
-TCP_HOST: str = os.environ.get("TCP_HOST", "0.0.0.0")   # 监听所有网卡
+# ── TCP server configuration ───────────────────────────────
+TCP_HOST: str = os.environ.get("TCP_HOST", "0.0.0.0")   # listen on all interfaces
 TCP_PORT: int = int(os.environ.get("TCP_PORT", "9000"))
 
-# ── 看门狗配置 ────────────────────────────────────────────
+# ── Watchdog configuration ─────────────────────────────────
 WATCHDOG_TIMEOUT: float = float(os.environ.get("WATCHDOG_TIMEOUT", "2.0"))
 
-# ── 允许写入串口的字符白名单 ──────────────────────────────
+# ── Allowed command characters (serial whitelist) ──────────
 ALLOWED_COMMANDS: set = {"w", "s", "a", "d", " "}
 HEARTBEAT_CHAR: str = "H"
+
+# ── OAK-D PoE 相机配置 ────────────────────────────────────
+CAM1_IP: str = os.environ.get("CAM1_IP", "192.168.1.101")
+CAM2_IP: str = os.environ.get("CAM2_IP", "192.168.1.102")
+
+# ── MJPEG HTTP 流端口 ─────────────────────────────────────
+CAM1_STREAM_PORT: int = int(os.environ.get("CAM1_STREAM_PORT", "8080"))
+CAM2_STREAM_PORT: int = int(os.environ.get("CAM2_STREAM_PORT", "8081"))
+
+# ── 相机参数 ──────────────────────────────────────────────
+CAM_FPS: int       = int(os.environ.get("CAM_FPS", "30"))
+CAM_WIDTH: int     = int(os.environ.get("CAM_WIDTH", "1280"))
+CAM_HEIGHT: int    = int(os.environ.get("CAM_HEIGHT", "720"))
+MJPEG_QUALITY: int = int(os.environ.get("MJPEG_QUALITY", "80"))  # 1-100
+
+# ── 本地预览开关 ──────────────────────────────────────────
+LOCAL_DISPLAY: bool = os.environ.get("LOCAL_DISPLAY", "0") == "1"
