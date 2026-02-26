@@ -46,7 +46,8 @@ class SimpleColorSource(FrameSource):
 
     depthai v3 changes vs v2:
     - XLinkOut node removed → use cam.output.createOutputQueue() directly
-    - dai.Device(pipeline) removed → pipeline.start([device_info]) manages device
+    - Device created separately: dai.Device([device_info]), passed to Pipeline constructor
+    - pipeline.start() takes no arguments in v3
     - device.getOutputQueue() removed → queue obtained from node output before start
 
     Args:
@@ -56,6 +57,7 @@ class SimpleColorSource(FrameSource):
 
     def __init__(self, device_ip: Optional[str] = None) -> None:
         self._device_ip = device_ip
+        self._device = None
         self._pipeline = None
         self._q_rgb = None
 
@@ -64,7 +66,17 @@ class SimpleColorSource(FrameSource):
 
         from config import CAM_FPS, CAM_HEIGHT, CAM_WIDTH
 
-        pipeline = dai.Pipeline()
+        # v3: device must be created first, then passed to Pipeline constructor
+        try:
+            if self._device_ip:
+                self._device = dai.Device(dai.DeviceInfo(self._device_ip))
+            else:
+                self._device = dai.Device()
+        except Exception as e:
+            logger.error(f"Failed to open depthai device (ip={self._device_ip}): {e}")
+            raise
+
+        pipeline = dai.Pipeline(self._device)
 
         cam_rgb = pipeline.create(dai.node.ColorCamera)
         cam_rgb.setPreviewSize(CAM_WIDTH, CAM_HEIGHT)
@@ -76,11 +88,7 @@ class SimpleColorSource(FrameSource):
         self._q_rgb = cam_rgb.preview.createOutputQueue(maxSize=1, blocking=False)
 
         try:
-            if self._device_ip:
-                device_info = dai.DeviceInfo(self._device_ip)
-                pipeline.start(device_info)
-            else:
-                pipeline.start()
+            pipeline.start()   # v3: no arguments
         except Exception as e:
             logger.error(f"Failed to start depthai pipeline (ip={self._device_ip}): {e}")
             self._q_rgb = None
@@ -99,6 +107,12 @@ class SimpleColorSource(FrameSource):
             except Exception as e:
                 logger.warning(f"Error stopping depthai pipeline: {e}")
             self._pipeline = None
+        if self._device is not None:
+            try:
+                self._device.close()
+            except Exception as e:
+                logger.warning(f"Error closing depthai device: {e}")
+            self._device = None
         self._q_rgb = None
         logger.info(f"SimpleColorSource closed (device: {self._device_ip or 'USB/auto'})")
 
