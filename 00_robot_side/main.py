@@ -15,11 +15,13 @@ Scenarios:
 """
 
 import logging
+import os
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 _py_name = Path(__file__).stem
 Path("log").mkdir(exist_ok=True)
@@ -67,6 +69,32 @@ CAMERA_MENU = {
 }
 
 
+def ask_camera_selection() -> dict:
+    """弹出相机选择菜单，返回要注入子进程的环境变量 dict。"""
+    from config import CAM1_IP, CAM2_IP
+    print()
+    print("─" * 40)
+    print("  请选择相机 / Select Camera")
+    print("─" * 40)
+    print(f"  1. 相机 1  (IP: {CAM1_IP})")
+    print(f"  2. 相机 2  (IP: {CAM2_IP})")
+    print("  3. 两台相机")
+    print("─" * 40)
+    while True:
+        try:
+            choice = input("  选择 [1/2/3]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            choice = "1"
+        if choice == "1":
+            return {"CAM_SELECTION": "1", "DEVICE_IP": CAM1_IP}
+        elif choice == "2":
+            return {"CAM_SELECTION": "2", "DEVICE_IP": CAM2_IP}
+        elif choice == "3":
+            return {"CAM_SELECTION": "both"}  # DEVICE_IP 不设置，auto-detect
+        print("  请输入 1、2 或 3")
+
+
 def print_menu() -> None:
     print()
     print("=" * 55)
@@ -99,14 +127,15 @@ def _flush_stdin() -> None:
         pass
 
 
-def run_scripts(cmds: list[list[str]]) -> None:
+def run_scripts(cmds: list[list[str]], env_extra: Optional[dict] = None) -> None:
     """Launch commands as subprocesses and wait until all exit."""
     procs: list[subprocess.Popen] = []
+    env = {**os.environ, **(env_extra or {})}
 
     for cmd in cmds:
         logger.info(f"Starting: {cmd[1]}")
         try:
-            p = subprocess.Popen(cmd)
+            p = subprocess.Popen(cmd, env=env)
             procs.append(p)
         except Exception as e:
             logger.error(f"Failed to start {cmd[1]}: {e}")
@@ -153,11 +182,11 @@ def run_scripts(cmds: list[list[str]]) -> None:
     logger.info("All processes stopped")
 
 
-def run_single_cmd(cmd: list[str]) -> None:
-    run_scripts([cmd])
+def run_single_cmd(cmd: list[str], env_extra: Optional[dict] = None) -> None:
+    run_scripts([cmd], env_extra=env_extra)
 
 
-def run_camera_menu() -> None:
+def run_camera_menu(env_extra: Optional[dict] = None) -> None:
     print_camera_menu()
     while True:
         try:
@@ -176,7 +205,7 @@ def run_camera_menu() -> None:
         item = CAMERA_MENU[choice]
         logger.info(f"Camera test selected: [{choice}] {item['label']}")
         print(f"\n>>> Starting: {item['label']}\n")
-        run_single_cmd(item["cmd"])
+        run_single_cmd(item["cmd"], env_extra=env_extra)
         print_camera_menu()
 
 
@@ -196,7 +225,8 @@ def main() -> None:
             sys.exit(0)
 
         if choice == "5":
-            run_camera_menu()
+            cam_env = ask_camera_selection()
+            run_camera_menu(env_extra=cam_env)
             print_menu()
             continue
 
@@ -208,8 +238,12 @@ def main() -> None:
         logger.info(f"Selected: [{choice}] {item['label']}")
         print(f"\n>>> Starting: {item['label']}\n")
 
+        cam_env: Optional[dict] = None
+        if choice in ("2", "4"):
+            cam_env = ask_camera_selection()
+
         try:
-            run_scripts(item["cmds"])
+            run_scripts(item["cmds"], env_extra=cam_env)
         except Exception as e:
             logger.error(f"Launch error: {e}")
 

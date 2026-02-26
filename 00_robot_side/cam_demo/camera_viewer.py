@@ -11,12 +11,15 @@ Controls (in OpenCV window):
 """
 
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
 
 import cv2
 import depthai as dai
+
+_DEVICE_IP = os.environ.get("DEVICE_IP", None)
 
 # ── Logging configuration ──────────────────────────────────
 _py_name = Path(__file__).stem
@@ -48,7 +51,13 @@ def main():
     global _stop
     logger.info("Starting camera viewer (300×300, CAM_A)")
     try:
-        with dai.Pipeline() as pipeline:
+        if _DEVICE_IP:
+            logger.info(f"Connecting to device IP: {_DEVICE_IP}")
+            _device = dai.Device(dai.DeviceInfo(_DEVICE_IP))
+            pipeline_cm = dai.Pipeline(_device)
+        else:
+            pipeline_cm = dai.Pipeline()
+        with pipeline_cm as pipeline:
             cam = pipeline.create(dai.node.Camera).build()
             q = cam.requestOutput((300, 300)).createOutputQueue()
             pipeline.start()

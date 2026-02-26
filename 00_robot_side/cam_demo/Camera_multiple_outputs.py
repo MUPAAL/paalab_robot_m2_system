@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import os
 import sys
 
 import cv2
 import depthai as dai
 import time
+
+_DEVICE_IP = os.environ.get("DEVICE_IP", None)
 
 # Create pipeline
 
@@ -39,7 +42,12 @@ args = sys.argv[1:]
 if len(args) < 5 or len(args) % 5 != 0:
     exit_usage()
 
-with dai.Pipeline() as pipeline:
+if _DEVICE_IP:
+    _device = dai.Device(dai.DeviceInfo(_DEVICE_IP))
+    _pipeline_cm = dai.Pipeline(_device)
+else:
+    _pipeline_cm = dai.Pipeline()
+with _pipeline_cm as pipeline:
     cams: dict = {}
     queues = []
     for i in range(0, len(args), 5):

@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 
+import os
 from pathlib import Path
 import cv2
 import depthai as dai
 import numpy as np
 import time
 
+_DEVICE_IP = os.environ.get("DEVICE_IP", None)
+
 # Create pipeline
-with dai.Pipeline() as pipeline:
+if _DEVICE_IP:
+    _device = dai.Device(dai.DeviceInfo(_DEVICE_IP))
+    _pipeline_cm = dai.Pipeline(_device)
+else:
+    _pipeline_cm = dai.Pipeline()
+with _pipeline_cm as pipeline:
     cameraNode = pipeline.create(dai.node.Camera).build()
     detectionNetwork = pipeline.create(dai.node.DetectionNetwork).build(cameraNode, dai.NNModelDescription("yolov6-nano"))
     labelMap = detectionNetwork.getClasses()

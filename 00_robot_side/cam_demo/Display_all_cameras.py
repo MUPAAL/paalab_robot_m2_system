@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 
+import os
+
 import cv2
 import depthai as dai
 
+_DEVICE_IP = os.environ.get("DEVICE_IP", None)
+
 # Create pipeline
-device = dai.Device()
+if _DEVICE_IP:
+    device = dai.Device(dai.DeviceInfo(_DEVICE_IP))
+else:
+    device = dai.Device()
 with dai.Pipeline(device) as pipeline:
     outputQueues = {}
     sockets = device.getConnectedCameras()

@@ -7,13 +7,15 @@ never changes.
 
 Usage (standalone):
     export CAM1_IP=10.95.76.10        # optional, for OAK-D PoE
+    export CAM_SELECTION=1            # "1" (default), "2", or "both"
     export LOCAL_DISPLAY=1            # show local preview window
     cd m2_system/00_robot_side
     python camera_streamer.py
 
 Endpoints (default ports):
-    http://0.0.0.0:8080/   ->  CAM1 MJPEG stream
-    http://0.0.0.0:8081/   ->  CAM2 MJPEG stream  (set CAM2_ENABLED=1)
+    http://localhost:8080/   ->  CAM1 MJPEG stream  (CAM_SELECTION=1 or both)
+    http://localhost:8080/   ->  CAM2 MJPEG stream  (CAM_SELECTION=2, reuses port 8080)
+    http://localhost:8081/   ->  CAM2 MJPEG stream  (CAM_SELECTION=both)
 
 To swap the pipeline (no other code changes needed):
     from frame_source import YOLODetectionSource
@@ -120,7 +122,7 @@ class MJPEGServer:
             name=f"mjpeg-{self._port}",
         )
         self._server_thread.start()
-        logger.info(f"MJPEG server started → http://0.0.0.0:{self._port}/")
+        logger.info(f"MJPEG server started → http://localhost:{self._port}/")
 
     def stop(self) -> None:
         """Stop the HTTP server and release the FrameSource."""
@@ -200,19 +202,32 @@ class MJPEGServer:
 # ── Standalone entry point ─────────────────────────────────────────────────
 
 def main() -> None:
-    dual_cam: bool = os.environ.get("CAM2_ENABLED", "0") == "1"
+    cam_sel = os.environ.get("CAM_SELECTION", "1")  # "1", "2", or "both"
 
     servers: list[tuple[MJPEGServer, SimpleColorSource]] = []
+    src_for_display: Optional[SimpleColorSource] = None
+    active_ports: list[int] = []
 
-    # CAM1 (always active)
-    src1 = SimpleColorSource(device_ip=CAM1_IP)
-    srv1 = MJPEGServer(source=src1, port=CAM1_STREAM_PORT)
-    servers.append((srv1, src1))
+    if cam_sel in ("1", "both"):
+        src1 = SimpleColorSource(device_ip=CAM1_IP)
+        srv1 = MJPEGServer(source=src1, port=CAM1_STREAM_PORT)
+        servers.append((srv1, src1))
+        src_for_display = src1
+        active_ports.append(CAM1_STREAM_PORT)
 
-    if dual_cam:
+    if cam_sel in ("2", "both"):
+        # "2" only → 复用 CAM1_STREAM_PORT 作为唯一端口
+        port2 = CAM2_STREAM_PORT if cam_sel == "both" else CAM1_STREAM_PORT
         src2 = SimpleColorSource(device_ip=CAM2_IP)
-        srv2 = MJPEGServer(source=src2, port=CAM2_STREAM_PORT)
+        srv2 = MJPEGServer(source=src2, port=port2)
         servers.append((srv2, src2))
+        if src_for_display is None:
+            src_for_display = src2
+        active_ports.append(port2)
+
+    if not servers:
+        logger.error(f"Invalid CAM_SELECTION value: '{cam_sel}', expected '1', '2', or 'both'")
+        sys.exit(1)
 
     # Start all servers
     for srv, _ in servers:
@@ -233,17 +248,16 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    ports = ", ".join(str(CAM1_STREAM_PORT) if i == 0 else str(CAM2_STREAM_PORT)
-                      for i in range(len(servers)))
-    logger.info(f"Streaming on port(s): {ports} — press Ctrl+C to stop")
+    ports_str = ", ".join(str(p) for p in active_ports)
+    logger.info(f"Streaming on port(s): {ports_str} — press Ctrl+C to stop")
 
     # Optional local preview (macOS: must be on main thread)
     if LOCAL_DISPLAY:
         logger.info("Local display enabled (LOCAL_DISPLAY=1)")
         while True:
-            frame = src1.get_frame()
+            frame = src_for_display.get_frame()
             if frame is not None:
-                cv2.imshow("CAM1 local preview", frame)
+                cv2.imshow("Camera local preview", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 logger.info("Local display: 'q' pressed, stopping")
                 _shutdown()

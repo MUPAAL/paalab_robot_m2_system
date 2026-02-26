@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 
+import os
+
 import numpy as np
 import cv2
 import depthai as dai
 import time
 from datetime import timedelta
+
+_DEVICE_IP = os.environ.get("DEVICE_IP", None)
 FPS = 25.0
 
 RGB_SOCKET = dai.CameraBoardSocket.CAM_A
@@ -25,7 +29,11 @@ class FPSCounter:
             return 0
         return (len(self.frameTimes) - 1) / (self.frameTimes[-1] - self.frameTimes[0])
 
-pipeline = dai.Pipeline()
+if _DEVICE_IP:
+    _device = dai.Device(dai.DeviceInfo(_DEVICE_IP))
+    pipeline = dai.Pipeline(_device)
+else:
+    pipeline = dai.Pipeline()
 
 platform = pipeline.getDefaultDevice().getPlatform()
 
