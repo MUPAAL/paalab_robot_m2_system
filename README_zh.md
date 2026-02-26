@@ -121,7 +121,7 @@ m2_system/
 与模式 B 的主要区别：
 - **比例控制**：摇杆直接映射到绝对速度，不再是增量步进
 - **对角线运动**：线速度和角速度同时设定，一条命令完成
-- **IMU HUD**：加速度计、陀螺仪、磁力罗盘实时显示于浏览器
+- **IMU HUD**：线加速度（已去除重力分量）、陀螺仪、磁力罗盘实时显示于浏览器
 - 无需安装任何 App，现代手机浏览器直接访问
 
 ---
@@ -203,6 +203,7 @@ pip install pynput opencv-python
 | `WEB_WS_PORT`         | `8889`                     | 同左               | Web 摇杆 WebSocket 端口      |
 | `MAX_LINEAR_VEL`      | `1.0` m/s                  | 同左               | 摇杆最大线速度               |
 | `MAX_ANGULAR_VEL`     | `1.0` rad/s                | 同左               | 摇杆最大角速度               |
+| `COORD_SYSTEM`        | `NED`                      | 同左               | IMU 坐标系：`NED`（x=北）或 `ENU`（x=东），影响罗盘方向转换 |
 
 ### 远程端（`01_remote_side/config.py`）
 

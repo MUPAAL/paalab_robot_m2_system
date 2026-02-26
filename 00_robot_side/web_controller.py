@@ -77,13 +77,13 @@ def quaternion_to_compass(real: float, i: float, j: float, k: float) -> tuple[fl
     Coordinate system selectable via COORD_SYSTEM env var (default: NED).
     """
     coord = os.environ.get("COORD_SYSTEM", "NED").upper()
+    yaw_rad = math.atan2(2 * (real * k + i * j), 1 - 2 * (j * j + k * k))
     if coord == "ENU":
-        # ENU: yaw = atan2(2*(w*z + x*y), 1 - 2*(y^2 + z^2))
-        yaw_rad = math.atan2(2 * (real * k + i * j), 1 - 2 * (j * j + k * k))
+        # ENU: yaw is measured counter-clockwise from East; convert to clockwise-from-North bearing
+        bearing = (90.0 - math.degrees(yaw_rad)) % 360.0
     else:
-        # NED: yaw = atan2(2*(w*k + i*j), 1 - 2*(j^2 + k^2))
-        yaw_rad = math.atan2(2 * (real * k + i * j), 1 - 2 * (j * j + k * k))
-    bearing = math.degrees(yaw_rad) % 360.0
+        # NED: yaw is already a clockwise-from-North bearing
+        bearing = math.degrees(yaw_rad) % 360.0
     cardinals = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
     cardinal  = cardinals[int((bearing + 22.5) / 45.0) % 8]
     return bearing, cardinal
@@ -107,7 +107,7 @@ class IMUReader(threading.Thread):
         try:
             with dai.Pipeline() as pipeline:
                 imu_node = pipeline.create(dai.node.IMU)
-                imu_node.enableIMUSensor(dai.IMUSensor.ACCELEROMETER_RAW, 480)
+                imu_node.enableIMUSensor(dai.IMUSensor.LINEAR_ACCELERATION, 400)
                 imu_node.enableIMUSensor(dai.IMUSensor.GYROSCOPE_RAW, 400)
                 imu_node.enableIMUSensor(dai.IMUSensor.ROTATION_VECTOR, 100)
                 imu_node.setBatchReportThreshold(1)

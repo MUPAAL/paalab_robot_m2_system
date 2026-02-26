@@ -125,7 +125,7 @@ Phone browser ──HTTP:8888──► web_static/index.html   (nipplejs joystic
 Key differences from Mode B:
 - **Proportional control**: joystick maps directly to absolute speed values — no incremental steps.
 - **Diagonal motion**: linear and angular velocity set simultaneously in a single command.
-- **IMU HUD**: accelerometer, gyroscope, and magnetic compass rendered in the browser.
+- **IMU HUD**: linear acceleration (gravity-compensated), gyroscope, and magnetic compass rendered in the browser.
 - No dedicated app required — works in any modern mobile browser.
 
 ---
@@ -207,6 +207,7 @@ pip install pynput opencv-python
 | `WEB_WS_PORT`         | `8889`                     | same               | Web joystick WebSocket port        |
 | `MAX_LINEAR_VEL`      | `1.0` m/s                  | same               | Joystick maximum linear velocity   |
 | `MAX_ANGULAR_VEL`     | `1.0` rad/s                | same               | Joystick maximum angular velocity  |
+| `COORD_SYSTEM`        | `NED`                      | same               | IMU coordinate frame for compass: `NED` (x=North) or `ENU` (x=East) |
 
 ### Remote side (`01_remote_side/config.py`)
 
