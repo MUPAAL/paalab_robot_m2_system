@@ -70,19 +70,19 @@ CAMERA_MENU = {
 
 
 def ask_camera_selection() -> dict:
-    """弹出相机选择菜单，返回要注入子进程的环境变量 dict。"""
+    """Show camera selection prompt and return env-var dict to inject into subprocesses."""
     from config import CAM1_IP, CAM2_IP
     print()
     print("─" * 40)
-    print("  请选择相机 / Select Camera")
+    print("  Select Camera")
     print("─" * 40)
-    print(f"  1. 相机 1  (IP: {CAM1_IP})")
-    print(f"  2. 相机 2  (IP: {CAM2_IP})")
-    print("  3. 两台相机")
+    print(f"  1. Camera 1  (IP: {CAM1_IP})")
+    print(f"  2. Camera 2  (IP: {CAM2_IP})")
+    print("  3. Both cameras")
     print("─" * 40)
     while True:
         try:
-            choice = input("  选择 [1/2/3]: ").strip()
+            choice = input("  Choice [1/2/3]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             choice = "1"
@@ -91,8 +91,8 @@ def ask_camera_selection() -> dict:
         elif choice == "2":
             return {"CAM_SELECTION": "2", "DEVICE_IP": CAM2_IP}
         elif choice == "3":
-            return {"CAM_SELECTION": "both"}  # DEVICE_IP 不设置，auto-detect
-        print("  请输入 1、2 或 3")
+            return {"CAM_SELECTION": "both"}  # DEVICE_IP not set — auto-detect
+        print("  Please enter 1, 2, or 3")
 
 
 def print_menu() -> None:

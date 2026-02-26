@@ -257,13 +257,13 @@ python main.py
 
 ```
 ────────────────────────────
-  请选择相机 / Select Camera
+  Select Camera
 ────────────────────────────
-  1. 相机 1  (IP: 10.95.76.10)
-  2. 相机 2  (IP: 10.95.76.11)
-  3. 两台相机
+  1. Camera 1  (IP: 10.95.76.10)
+  2. Camera 2  (IP: 10.95.76.11)
+  3. Both cameras
 ────────────────────────────
-  选择 [1/2/3]:
+  Choice [1/2/3]:
 ```
 
 | Selection | `camera_streamer.py` ports  | `DEVICE_IP` injected                              |
