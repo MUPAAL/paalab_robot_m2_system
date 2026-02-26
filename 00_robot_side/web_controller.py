@@ -62,6 +62,7 @@ _imu_data: dict = {
     "compass": {
         "bearing": 0.0, "cardinal": "N",
         "calibrated": False,
+        "accuracy": 0,
         "quat": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
     },
     "ts": 0.0,
