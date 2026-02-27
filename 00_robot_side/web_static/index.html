@@ -150,6 +150,60 @@
   #state-btn.state-ready  { background: #1a0a0a; color: var(--red);   border-bottom: 2px solid var(--red); }
   #state-btn.state-active { background: #0a1a0e; color: var(--green); border-bottom: 2px solid var(--green); box-shadow: 0 0 8px rgba(0,255,136,0.2); }
   #state-btn:disabled     { opacity: 0.4; cursor: not-allowed; }
+
+  /* RTK panel */
+  #rtk-panel {
+    background: var(--panel);
+    padding: 8px 10px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  #rtk-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border); padding-bottom: 4px;
+  }
+  #rtk-title { color: var(--accent); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
+  #rtk-fix-badge {
+    font-size: 10px; font-weight: bold; letter-spacing: 1px;
+    padding: 1px 6px; border-radius: 3px;
+    background: #2a0a0a; color: var(--red); border: 1px solid var(--red);
+  }
+  #rtk-fix-badge.fix-gps  { background: #2a1a00; color: var(--warn); border-color: var(--warn); }
+  #rtk-fix-badge.fix-rtk  { background: #0a1a0e; color: var(--green); border-color: var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.3); }
+  #rtk-live-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--dim); margin-left: auto;
+  }
+  #rtk-live-dot.live { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  #rtk-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 3px 8px;
+  }
+  .rtk-cell { display: flex; flex-direction: column; }
+  .rtk-cell-label { color: var(--dim); font-size: 9px; letter-spacing: 0.5px; }
+  .rtk-cell-val   { color: var(--text); font-size: 11px; }
+  .rtk-cell-val.accent { color: var(--accent); }
+
+  /* Record button */
+  #rec-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #rec-btn {
+    padding: 5px 14px;
+    border: none; outline: none;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px; font-weight: bold; letter-spacing: 1.5px;
+    cursor: pointer; border-radius: 3px;
+    transition: background 0.2s;
+  }
+  #rec-btn.rec-idle    { background: #1e2d3d; color: var(--dim);   border: 1px solid var(--border); }
+  #rec-btn.rec-active  { background: #2a0808; color: var(--red);   border: 1px solid var(--red); box-shadow: 0 0 6px rgba(255,64,96,0.3); }
+  #rec-filename { color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 </style>
 </head>
 <body>
@@ -230,6 +284,47 @@
     </div>
   </div>
 
+  <!-- RTK GPS panel -->
+  <div id="rtk-panel">
+    <div id="rtk-header">
+      <span id="rtk-title">RTK GPS</span>
+      <span id="rtk-fix-badge">NO FIX</span>
+      <span id="rtk-live-dot" title="RTK OFFLINE"></span>
+    </div>
+    <div id="rtk-grid">
+      <div class="rtk-cell">
+        <span class="rtk-cell-label">LAT</span>
+        <span class="rtk-cell-val accent" id="rtk-lat">--</span>
+      </div>
+      <div class="rtk-cell">
+        <span class="rtk-cell-label">LON</span>
+        <span class="rtk-cell-val accent" id="rtk-lon">--</span>
+      </div>
+      <div class="rtk-cell">
+        <span class="rtk-cell-label">ALT (m)</span>
+        <span class="rtk-cell-val" id="rtk-alt">--</span>
+      </div>
+      <div class="rtk-cell">
+        <span class="rtk-cell-label">SATS</span>
+        <span class="rtk-cell-val" id="rtk-sats">--</span>
+      </div>
+      <div class="rtk-cell">
+        <span class="rtk-cell-label">HDOP</span>
+        <span class="rtk-cell-val" id="rtk-hdop">--</span>
+      </div>
+      <div class="rtk-cell">
+        <span class="rtk-cell-label">SPD (kn)</span>
+        <span class="rtk-cell-val" id="rtk-spd">--</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Record bar -->
+  <div id="rec-bar">
+    <button id="rec-btn" class="rec-idle">● REC</button>
+    <span id="rec-filename">—</span>
+  </div>
+
   <!-- Joystick zone -->
   <div id="joystick-zone">
     <span id="joystick-hint">TOUCH TO CONTROL</span>
@@ -306,8 +401,10 @@ function connect() {
   ws.onmessage = (evt) => {
     try {
       const msg = JSON.parse(evt.data);
-      if (msg.type === "imu") handleIMU(msg);
-      if (msg.type === "status") handleStatus(msg);
+      if (msg.type === "imu")           handleIMU(msg);
+      if (msg.type === "status")        handleStatus(msg);
+      if (msg.type === "rtk")           handleRTK(msg);
+      if (msg.type === "record_status") handleRecordStatus(msg);
     } catch(e) {}
   };
 }
@@ -393,6 +490,59 @@ function handleStatus(msg) {
   // Could show serial/imu status if needed
 }
 
+// ── RTK HUD update ──────────────────────────────────────
+const FIX_LABELS = {
+  0: { text: "NO FIX",   cls: "" },
+  1: { text: "GPS",      cls: "fix-gps" },
+  2: { text: "DGPS",     cls: "fix-gps" },
+  4: { text: "RTK FIX",  cls: "fix-rtk" },
+  5: { text: "RTK FLT",  cls: "fix-gps" },
+};
+
+function handleRTK(msg) {
+  const dot   = document.getElementById('rtk-live-dot');
+  const badge = document.getElementById('rtk-fix-badge');
+
+  if (!msg.available) {
+    dot.className = '';
+    dot.title = 'RTK OFFLINE';
+    badge.textContent = 'OFFLINE';
+    badge.className = '';
+    return;
+  }
+
+  dot.className = 'live';
+  dot.title = 'RTK LIVE';
+
+  const fq = msg.fix_quality || 0;
+  const fi = FIX_LABELS[fq] || { text: `FIX(${fq})`, cls: "fix-gps" };
+  badge.textContent = fi.text;
+  badge.className = fi.cls;
+
+  const fmtCoord = (v, d) => (v !== null && v !== undefined) ? v.toFixed(d) : '--';
+  document.getElementById('rtk-lat').textContent  = fmtCoord(msg.lat, 7);
+  document.getElementById('rtk-lon').textContent  = fmtCoord(msg.lon, 7);
+  document.getElementById('rtk-alt').textContent  = fmtCoord(msg.alt, 2);
+  document.getElementById('rtk-sats').textContent = (msg.num_sats !== null && msg.num_sats !== undefined) ? msg.num_sats : '--';
+  document.getElementById('rtk-hdop').textContent = fmtCoord(msg.hdop, 2);
+  document.getElementById('rtk-spd').textContent  = fmtCoord(msg.speed_knots, 2);
+}
+
+// ── Record status update ─────────────────────────────────
+function handleRecordStatus(msg) {
+  const btn      = document.getElementById('rec-btn');
+  const fnSpan   = document.getElementById('rec-filename');
+  if (msg.recording) {
+    btn.className = 'rec-active';
+    btn.textContent = '■ STOP';
+    fnSpan.textContent = msg.filename || '—';
+  } else {
+    btn.className = 'rec-idle';
+    btn.textContent = '● REC';
+    fnSpan.textContent = '—';
+  }
+}
+
 // ── Direction label ─────────────────────────────────────────
 function dirLabel(linear, angular) {
   const fwd  = linear  >  0.05;
@@ -472,6 +622,16 @@ window.addEventListener('load', () => {
   stateBtn.addEventListener('touchend', (e) => {
     e.preventDefault();
     toggleControlState();
+  });
+
+  // Record button bindings
+  const recBtn = document.getElementById('rec-btn');
+  recBtn.addEventListener('click', () => {
+    sendMsg({ type: "toggle_record" });
+  });
+  recBtn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    sendMsg({ type: "toggle_record" });
   });
 
   // Start WebSocket

@@ -57,3 +57,12 @@ WEB_WS_PORT:   int = int(os.environ.get("WEB_WS_PORT",   "8889"))
 # ── Maximum velocity limits for web joystick ──────────────
 MAX_LINEAR_VEL:  float = float(os.environ.get("MAX_LINEAR_VEL",  "1.0"))
 MAX_ANGULAR_VEL: float = float(os.environ.get("MAX_ANGULAR_VEL", "1.0"))
+
+# ── RTK GPS (Emlid RS+) ────────────────────────────────────
+RTK_PORT:    str   = os.environ.get("RTK_PORT",    "/dev/cu.usbmodem2403")
+RTK_BAUD:    int   = int(os.environ.get("RTK_BAUD",    "9600"))
+RTK_TIMEOUT: float = float(os.environ.get("RTK_TIMEOUT", "1.0"))
+RTK_ENABLED: bool  = os.environ.get("RTK_ENABLED", "1") == "1"
+
+# ── Data recording ─────────────────────────────────────────
+DATA_LOG_DIR: str = os.environ.get("DATA_LOG_DIR", "data_log")

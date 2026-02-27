@@ -36,7 +36,11 @@ from config import (
     WEB_HTTP_PORT, WEB_WS_PORT,
     MAX_LINEAR_VEL, MAX_ANGULAR_VEL,
     WATCHDOG_TIMEOUT,
+    RTK_PORT, RTK_BAUD, RTK_ENABLED,
+    DATA_LOG_DIR,
 )
+from rtk_reader    import RTKReader
+from data_recorder import DataRecorder
 
 # ── Logging ────────────────────────────────────────────────
 _py_name = Path(__file__).stem
@@ -68,6 +72,17 @@ _imu_data: dict = {
     "ts": 0.0,
 }
 _imu_available = False  # True once depthai pipeline is running
+
+# ── RTK reader (global, started in main()) ────────────────
+_rtk_reader: RTKReader | None = None
+
+# ── Data recorder (global, started in main()) ─────────────
+_data_recorder: DataRecorder | None = None
+
+# ── Last velocity command (protected by lock) ─────────────
+_vel_lock   = threading.Lock()
+_last_linear:  float = 0.0
+_last_angular: float = 0.0
 
 
 # ── Quaternion → compass bearing ──────────────────────────
@@ -242,6 +257,7 @@ class WebController:
 
     def _send_velocity(self, linear: float, angular: float) -> None:
         """Send direct velocity command V{linear:.2f},{angular:.2f}\\n to Feather M4."""
+        global _last_linear, _last_angular
         cmd = f"V{linear:.2f},{angular:.2f}\n".encode()
         with self._ser_lock:
             if self._ser is None or not self._ser.is_open:
@@ -253,6 +269,11 @@ class WebController:
             except serial.SerialException as e:
                 logger.error(f"Serial write failed: {e}")
                 self._serial_ok = False
+                return
+        # Update last command after successful write
+        with _vel_lock:
+            _last_linear  = linear
+            _last_angular = angular
 
     def _send_raw(self, data: bytes) -> None:
         """Send raw bytes directly to serial port (e.g. state toggle '\\r')."""
@@ -302,6 +323,9 @@ class WebController:
                     self._send_raw(b"\r")
                     logger.info("WebSocket: state toggle command sent (\\r)")
 
+                elif msg_type == "toggle_record":
+                    await self._handle_toggle_record()
+
         except websockets.exceptions.ConnectionClosedError:
             pass
         except Exception as e:
@@ -312,6 +336,43 @@ class WebController:
             logger.info(f"WebSocket client disconnected: {websocket.remote_address}")
             # Send emergency stop immediately on disconnect
             self._send_velocity(0.0, 0.0)
+
+    # ── Toggle record handler ─────────────────────────────
+    async def _handle_toggle_record(self) -> None:
+        """Start or stop CSV recording and broadcast status to all clients."""
+        if _data_recorder is None:
+            return
+        if _data_recorder.is_recording:
+            _data_recorder.stop()
+            msg = json.dumps({
+                "type": "record_status",
+                "recording": False,
+                "filename": "",
+            })
+            logger.info("DataRecorder: stopped via WebSocket toggle")
+        else:
+            try:
+                filename = _data_recorder.start()
+                msg = json.dumps({
+                    "type": "record_status",
+                    "recording": True,
+                    "filename": filename,
+                })
+                logger.info(f"DataRecorder: started via WebSocket toggle → {filename}")
+            except OSError:
+                msg = json.dumps({
+                    "type": "record_status",
+                    "recording": False,
+                    "filename": "",
+                })
+
+        async with self._clients_lock:
+            clients = set(self._clients)
+        for ws in clients:
+            try:
+                await ws.send(msg)
+            except Exception:
+                pass
 
     # ── IMU broadcast loop (20 Hz) ────────────────────────
     async def _imu_broadcast_loop(self) -> None:
@@ -351,15 +412,66 @@ class WebController:
                 # Reset timer to avoid flooding logs with repeated stop commands
                 self._last_heartbeat = time.time()
 
+    # ── RTK broadcast loop (1 Hz) ─────────────────────────
+    async def _rtk_broadcast_loop(self) -> None:
+        while True:
+            await asyncio.sleep(1.0)  # 1 Hz — GPS updates ~1 Hz
+            if _rtk_reader is None:
+                continue
+            snap = _rtk_reader.get_data()
+            msg = json.dumps({
+                "type":        "rtk",
+                "available":   _rtk_reader.is_available,
+                "lat":         snap["lat"],
+                "lon":         snap["lon"],
+                "alt":         snap["alt"],
+                "fix_quality": snap["fix_quality"],
+                "num_sats":    snap["num_sats"],
+                "hdop":        snap["hdop"],
+                "speed_knots": snap["speed_knots"],
+                "track_deg":   snap["track_deg"],
+            })
+            async with self._clients_lock:
+                clients = set(self._clients)
+            if not clients:
+                continue
+            dead = set()
+            for ws in clients:
+                try:
+                    await ws.send(msg)
+                except Exception:
+                    dead.add(ws)
+            if dead:
+                async with self._clients_lock:
+                    self._clients -= dead
+
+    # ── Data record loop (5 Hz) ───────────────────────────
+    async def _data_record_loop(self) -> None:
+        while True:
+            await asyncio.sleep(0.2)  # 5 Hz
+            if _data_recorder is None or not _data_recorder.is_recording:
+                continue
+            with _imu_lock:
+                imu_snap = dict(_imu_data)
+            rtk_snap = _rtk_reader.get_data() if _rtk_reader is not None else {}
+            with _vel_lock:
+                linear  = _last_linear
+                angular = _last_angular
+            _data_recorder.record(imu_snap, rtk_snap, linear, angular)
+
     # ── Status broadcast loop (low frequency) ─────────────
     async def _status_broadcast_loop(self) -> None:
         while True:
             await asyncio.sleep(2.0)
+            rtk_ok    = _rtk_reader.is_available if _rtk_reader is not None else False
+            recording = _data_recorder.is_recording if _data_recorder is not None else False
             msg = json.dumps({
-                "type": "status",
-                "serial_ok": self._serial_ok,
-                "imu_ok": _imu_available,
-                "message": "OK" if (self._serial_ok and _imu_available) else "DEGRADED",
+                "type":       "status",
+                "serial_ok":  self._serial_ok,
+                "imu_ok":     _imu_available,
+                "rtk_ok":     rtk_ok,
+                "recording":  recording,
+                "message":    "OK" if (self._serial_ok and _imu_available) else "DEGRADED",
             })
             async with self._clients_lock:
                 clients = set(self._clients)
@@ -386,11 +498,15 @@ class WebController:
                 self._imu_broadcast_loop(),
                 self._watchdog_loop(),
                 self._status_broadcast_loop(),
+                self._rtk_broadcast_loop(),
+                self._data_record_loop(),
             )
 
 
 # ── Entry point ───────────────────────────────────────────
 def main() -> None:
+    global _rtk_reader, _data_recorder
+
     logger.info("=" * 50)
     logger.info("Web Joystick Controller starting...")
     logger.info(f"  HTTP port : {WEB_HTTP_PORT}")
@@ -398,6 +514,8 @@ def main() -> None:
     logger.info(f"  Serial    : {FEATHER_PORT}")
     logger.info(f"  Max vel   : linear={MAX_LINEAR_VEL} m/s, angular={MAX_ANGULAR_VEL} rad/s")
     logger.info(f"  Watchdog  : {WATCHDOG_TIMEOUT}s")
+    logger.info(f"  RTK GPS   : {'enabled (' + RTK_PORT + ')' if RTK_ENABLED else 'disabled'}")
+    logger.info(f"  Data log  : {DATA_LOG_DIR}/")
     logger.info("=" * 50)
 
     controller = WebController()
@@ -409,6 +527,18 @@ def main() -> None:
     # Start IMU reader thread (daemon thread)
     imu_reader = IMUReader()
     imu_reader.start()
+
+    # Start RTK reader thread (daemon thread)
+    if RTK_ENABLED:
+        _rtk_reader = RTKReader()
+        _rtk_reader.start()
+        logger.info(f"RTKReader started: {RTK_PORT} @ {RTK_BAUD} baud")
+    else:
+        logger.info("RTKReader disabled (RTK_ENABLED=0)")
+
+    # Initialize data recorder
+    _data_recorder = DataRecorder(DATA_LOG_DIR)
+    logger.info(f"DataRecorder initialized: log_dir={DATA_LOG_DIR}")
 
     # Resolve local IP for user-facing access hint
     try:

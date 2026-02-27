@@ -22,13 +22,15 @@ Robot side (00_robot_side/)
 └── camera_streamer.py ← FrameSource (swappable pipeline)
 
 Mobile phone (browser, same LAN)
-└── HTTP :8888 → index.html (nipplejs joystick + IMU HUD)
+└── HTTP :8888 → index.html (nipplejs joystick + IMU HUD + RTK panel + REC button)
         │
         │  WebSocket :8889
         ▼
 Robot side (00_robot_side/)
 └── web_controller.py → serial → Feather M4 CAN → CAN bus → Amiga Dashboard
-                      ← IMU (OAK-D BNO085, 20 Hz broadcast)
+                      ← IMU  (OAK-D BNO085, 20 Hz broadcast)
+                      ← RTK  (Emlid RS+, 1 Hz broadcast)
+                      → CSV  (data_log/, manual start/stop via browser)
 ```
 
 ---
@@ -45,12 +47,15 @@ m2_system/
 │   ├── local_controller.py         # Local keyboard → serial (no TCP required)
 │   ├── frame_source.py             # FrameSource ABC + SimpleColorSource (OAK-D)
 │   ├── camera_streamer.py          # MJPEGServer: streams any FrameSource over HTTP
-│   ├── web_controller.py           # Web joystick: HTTP :8888 + WebSocket :8889 + IMU broadcast
+│   ├── web_controller.py           # Web joystick: HTTP :8888 + WebSocket :8889 + IMU/RTK broadcast + CSV recorder
+│   ├── rtk_reader.py               # RTKReader daemon thread — NMEA GGA/RMC parser (Emlid RS+)
+│   ├── data_recorder.py            # DataRecorder — IMU+RTK+cmd CSV writer (start/stop via browser)
 │   ├── web_static/
-│   │   ├── index.html              # Single-page HUD (nipplejs joystick + compass + IMU)
+│   │   ├── index.html              # Single-page HUD (nipplejs joystick + compass + IMU + RTK panel + REC button)
 │   │   └── nipplejs.min.js         # nipplejs local copy (no CDN required on LAN)
 │   ├── main.py                     # Interactive launcher menu (recommended entry point)
 │   ├── log/                        # Runtime logs (auto-created)
+│   ├── data_log/                   # CSV data recordings (auto-created on first REC)
 │   └── cam_demo/                   # OAK-D camera demo scripts
 │       ├── camera_viewer.py
 │       ├── Camera_output.py
@@ -114,18 +119,23 @@ Remote PC ──TCP:9000──► robot_receiver.py ──serial──► Feathe
 ### Mode D — Web joystick control (mobile-friendly)
 
 Control the robot from any smartphone or tablet browser on the same LAN.
-Provides proportional joystick input (diagonal motion supported) and a live IMU / compass HUD.
+Provides proportional joystick input (diagonal motion supported), a live IMU / compass HUD,
+RTK GPS display, and manual CSV data recording.
 
 ```
-Phone browser ──HTTP:8888──► web_static/index.html   (nipplejs joystick + IMU HUD)
+Phone browser ──HTTP:8888──► web_static/index.html   (nipplejs joystick + IMU HUD + RTK + REC)
               ──WS:8889────► web_controller.py ──serial──► Feather M4 CAN
               ◄─WS:8889───── web_controller.py ◄── OAK-D BNO085 IMU (20 Hz)
+                                               ◄── Emlid RS+ RTK GPS  (1 Hz)
+                                               ──► data_log/*.csv     (on REC)
 ```
 
 Key differences from Mode B:
 - **Proportional control**: joystick maps directly to absolute speed values — no incremental steps.
 - **Diagonal motion**: linear and angular velocity set simultaneously in a single command.
 - **IMU HUD**: linear acceleration (gravity-compensated), gyroscope, and magnetic compass rendered in the browser.
+- **RTK GPS panel**: live lat/lon/alt, fix quality badge (NO FIX / GPS / DGPS / RTK FIXED / RTK FLOAT), satellite count, HDOP, speed.
+- **CSV recording**: tap **● REC** in the browser to start logging; tap **■ STOP** to close the file. Each recording session creates a timestamped file in `data_log/`.
 - No dedicated app required — works in any modern mobile browser.
 
 ---
@@ -208,6 +218,11 @@ pip install pynput opencv-python
 | `MAX_LINEAR_VEL`      | `1.0` m/s                  | same               | Joystick maximum linear velocity   |
 | `MAX_ANGULAR_VEL`     | `1.0` rad/s                | same               | Joystick maximum angular velocity  |
 | `COORD_SYSTEM`        | `NED`                      | same               | IMU coordinate frame for compass: `NED` (x=North) or `ENU` (x=East) |
+| `RTK_PORT`            | `/dev/cu.usbmodem2403`     | same               | Emlid RS+ serial port              |
+| `RTK_BAUD`            | `9600`                     | same               | RTK GPS baud rate                  |
+| `RTK_TIMEOUT`         | `1.0` s                    | same               | Serial readline timeout            |
+| `RTK_ENABLED`         | `1` (on)                   | same               | Set `0` to disable RTK entirely    |
+| `DATA_LOG_DIR`        | `data_log`                 | same               | Directory for CSV recordings       |
 
 ### Remote side (`01_remote_side/config.py`)
 
@@ -293,6 +308,16 @@ joystick right + up       → forward + turn right (diagonal motion)
 release joystick          → immediate stop
 disconnect / no heartbeat → watchdog stops robot after 2 s
 ```
+
+RTK GPS and data recording:
+
+```
+RTK panel (top of page)   → shows lat / lon / alt / fix quality / sats / HDOP / speed
+● REC button              → starts a new CSV in data_log/robot_data_YYYYMMDD_HHMMSS.csv
+■ STOP button             → closes the file
+```
+
+CSV columns: `timestamp, accel_x/y/z, gyro_x/y/z, compass_bearing, lat, lon, alt, fix_quality, num_sats, hdop, linear_cmd, angular_cmd`
 
 ### Remote side — all-in-one
 
@@ -404,6 +429,8 @@ Workflow:
 | `robot_receiver.py`         | `00_robot_side/log/robot_receiver.log`      |
 | `camera_streamer.py`        | `00_robot_side/log/camera_streamer.log`     |
 | `web_controller.py`         | `00_robot_side/log/web_controller.log`      |
+| `rtk_reader.py`             | `00_robot_side/log/rtk_reader.log`          |
+| `data_recorder.py`          | `00_robot_side/log/data_recorder.log`       |
 | `main.py` (remote side)     | `01_remote_side/log/main.log`               |
 | `remote_sender.py`          | `01_remote_side/log/remote_sender.log`      |
 | `remote_viewer.py`          | `01_remote_side/log/remote_viewer.log`      |

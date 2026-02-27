@@ -20,13 +20,15 @@
   └── camera_streamer.py  ← FrameSource（可插拔 Pipeline）
 
 手机浏览器（同 LAN）
-└── HTTP :8888 → index.html（nipplejs 摇杆 + IMU HUD）
+└── HTTP :8888 → index.html（nipplejs 摇杆 + IMU HUD + RTK 面板 + REC 按钮）
         │
         │  WebSocket :8889
         ▼
   机器人端 (00_robot_side/)
   └── web_controller.py → 串口 → Feather M4 CAN → CAN 总线 → Amiga Dashboard
-                        ← OAK-D BNO085 IMU（20 Hz 广播）
+                        ← IMU  OAK-D BNO085（20 Hz 广播）
+                        ← RTK  Emlid RS+（1 Hz 广播）
+                        → CSV  data_log/（浏览器手动 REC/STOP）
 ```
 
 ---
@@ -43,12 +45,15 @@ m2_system/
 │   ├── local_controller.py         # 本地键盘直连串口（无需 TCP）
 │   ├── frame_source.py             # FrameSource ABC + SimpleColorSource（OAK-D）
 │   ├── camera_streamer.py          # MJPEGServer：将 FrameSource 推流为 HTTP MJPEG
-│   ├── web_controller.py           # Web 摇杆：HTTP :8888 + WebSocket :8889 + IMU 广播
+│   ├── web_controller.py           # Web 摇杆：HTTP :8888 + WebSocket :8889 + IMU/RTK 广播 + CSV 记录
+│   ├── rtk_reader.py               # RTKReader 守护线程 — NMEA GGA/RMC 解析（Emlid RS+）
+│   ├── data_recorder.py            # DataRecorder — IMU+RTK+指令 CSV 写入（浏览器 start/stop）
 │   ├── web_static/
-│   │   ├── index.html              # 单页 HUD（nipplejs 摇杆 + 罗盘 + IMU 数据）
+│   │   ├── index.html              # 单页 HUD（nipplejs 摇杆 + 罗盘 + IMU + RTK 面板 + REC 按钮）
 │   │   └── nipplejs.min.js         # nipplejs 本地副本（LAN 无需 CDN）
 │   ├── main.py                     # 交互式启动菜单（推荐入口）
 │   ├── log/                        # 运行日志（自动创建）
+│   ├── data_log/                   # CSV 录制文件（首次点击 REC 自动创建）
 │   └── cam_demo/                   # OAK-D 相机示例脚本
 │       ├── camera_viewer.py
 │       ├── Camera_output.py
@@ -110,18 +115,22 @@ m2_system/
 ### 模式 D：Web 摇杆控制（手机/平板友好）
 
 用同局域网内的任意手机或平板浏览器控制机器人。
-支持**比例控制**（对角线运动）和实时 IMU / 罗盘 HUD 显示。
+支持**比例控制**（对角线运动）、实时 IMU / 罗盘 HUD、RTK GPS 面板，以及手动 CSV 数据录制。
 
 ```
-手机浏览器 ──HTTP:8888──► web_static/index.html（nipplejs 摇杆 + IMU HUD）
+手机浏览器 ──HTTP:8888──► web_static/index.html（摇杆 + IMU + RTK 面板 + REC 按钮）
           ──WS:8889────► web_controller.py ──串口──► Feather M4 CAN
           ◄─WS:8889───── web_controller.py ◄── OAK-D BNO085 IMU（20 Hz）
+                                           ◄── Emlid RS+ RTK GPS（1 Hz）
+                                           ──► data_log/*.csv（录制时）
 ```
 
 与模式 B 的主要区别：
 - **比例控制**：摇杆直接映射到绝对速度，不再是增量步进
 - **对角线运动**：线速度和角速度同时设定，一条命令完成
 - **IMU HUD**：线加速度（已去除重力分量）、陀螺仪、磁力罗盘实时显示于浏览器
+- **RTK GPS 面板**：实时显示经纬度、高度、定位质量徽章（NO FIX / GPS / DGPS / RTK FIXED / RTK FLOAT）、卫星数、HDOP、速度
+- **CSV 录制**：点击 **● REC** 开始记录，点击 **■ STOP** 关闭文件，每次生成一个带时间戳的文件保存在 `data_log/`
 - 无需安装任何 App，现代手机浏览器直接访问
 
 ---
@@ -204,6 +213,11 @@ pip install pynput opencv-python
 | `MAX_LINEAR_VEL`      | `1.0` m/s                  | 同左               | 摇杆最大线速度               |
 | `MAX_ANGULAR_VEL`     | `1.0` rad/s                | 同左               | 摇杆最大角速度               |
 | `COORD_SYSTEM`        | `NED`                      | 同左               | IMU 坐标系：`NED`（x=北）或 `ENU`（x=东），影响罗盘方向转换 |
+| `RTK_PORT`            | `/dev/cu.usbmodem2403`     | 同左               | Emlid RS+ 串口路径           |
+| `RTK_BAUD`            | `9600`                     | 同左               | RTK GPS 波特率               |
+| `RTK_TIMEOUT`         | `1.0` 秒                   | 同左               | 串口 readline 超时时间       |
+| `RTK_ENABLED`         | `1`（开）                  | 同左               | 设为 `0` 完全禁用 RTK        |
+| `DATA_LOG_DIR`        | `data_log`                 | 同左               | CSV 录制文件存放目录         |
 
 ### 远程端（`01_remote_side/config.py`）
 
@@ -289,6 +303,16 @@ force < 0.15      → 死区，机器人停止
 松开摇杆          → 立即发送急停
 断开/无心跳 2 秒  → 看门狗触发急停
 ```
+
+RTK GPS 与数据录制：
+
+```
+RTK 面板（页面上方）   → 显示经纬度 / 高度 / 定位质量 / 卫星数 / HDOP / 速度
+点击 ● REC            → 在 data_log/robot_data_YYYYMMDD_HHMMSS.csv 开始记录
+点击 ■ STOP           → 关闭文件
+```
+
+CSV 列：`timestamp, accel_x/y/z, gyro_x/y/z, compass_bearing, lat, lon, alt, fix_quality, num_sats, hdop, linear_cmd, angular_cmd`
 
 ### 远程端（一键启动）
 
@@ -399,6 +423,8 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 | `robot_receiver.py`     | `00_robot_side/log/robot_receiver.log`    |
 | `camera_streamer.py`    | `00_robot_side/log/camera_streamer.log`   |
 | `web_controller.py`     | `00_robot_side/log/web_controller.log`    |
+| `rtk_reader.py`         | `00_robot_side/log/rtk_reader.log`        |
+| `data_recorder.py`      | `00_robot_side/log/data_recorder.log`     |
 | `main.py`（远程端）     | `01_remote_side/log/main.log`             |
 | `remote_sender.py`      | `01_remote_side/log/remote_sender.log`    |
 | `remote_viewer.py`      | `01_remote_side/log/remote_viewer.log`    |
