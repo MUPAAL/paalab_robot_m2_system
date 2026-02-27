@@ -1,6 +1,6 @@
 # M2 System — Farm Robot LAN Control
 
-Remote keyboard control, live video streaming, and **mobile web joystick control** for the farm-ng Amiga agricultural robot over a local area network (LAN).
+Remote keyboard control, live video streaming, **mobile web joystick control**, and **autonomous GPS waypoint navigation** for the farm-ng Amiga agricultural robot over a local area network (LAN).
 
 > Chinese documentation: [README_zh.md](README_zh.md)
 
@@ -19,10 +19,10 @@ Remote PC (01_remote_side/)
         ▼
 Robot side (00_robot_side/)
 ├── robot_receiver.py  → serial → Feather M4 CAN → CAN bus → Amiga Dashboard
-└── camera_streamer.py ← FrameSource (swappable pipeline)
+└── camera/camera_streamer.py ← FrameSource (swappable pipeline)
 
-Mobile phone (browser, same LAN)
-└── HTTP :8888 → index.html (nipplejs joystick + IMU HUD + RTK panel + REC button)
+Mobile phone / browser (same LAN)
+└── HTTP :8888 → index.html (nipplejs joystick + IMU HUD + RTK panel + NAV panel)
         │
         │  WebSocket :8889
         ▼
@@ -31,6 +31,15 @@ Robot side (00_robot_side/)
                       ← IMU  (OAK-D BNO085, 20 Hz broadcast)
                       ← RTK  (Emlid RS+, 1 Hz broadcast)
                       → CSV  (data_log/, manual start/stop via browser)
+
+QGIS (CSV waypoints)
+        │ upload via browser
+        ▼
+    NavigationEngine (inside web_controller.py)
+    ├── WaypointManager   — CSV waypoint sequence
+    ├── GPS filter        — MovingAverageFilter or KalmanFilter (IMU-aided)
+    ├── Controller        — P2PController or PurePursuitController
+    └── 20 Hz control loop → V commands → serial → Feather M4 CAN
 ```
 
 ---
@@ -40,38 +49,39 @@ Robot side (00_robot_side/)
 ```
 m2_system/
 ├── 00_robot_side/                  # Robot PC (Mac Mini / Linux)
-│   ├── config.py                   # Serial / TCP / watchdog / camera / web params (env-overridable)
-│   ├── serial_writer.py            # Thread-safe serial wrapper with command whitelist
-│   ├── watchdog.py                 # Watchdog timer — triggers emergency stop on timeout
+│   ├── config.py                   # All parameters (serial/TCP/cam/web/nav), env-overridable
+│   ├── core/                       # Infrastructure package
+│   │   ├── serial_writer.py        # Thread-safe serial wrapper with command whitelist
+│   │   └── watchdog.py             # Watchdog timer — triggers emergency stop on timeout
+│   ├── sensors/                    # Sensor layer
+│   │   ├── imu_reader.py           # IMUReader daemon thread + quaternion_to_compass
+│   │   └── rtk_reader.py           # RTKReader daemon thread — NMEA GGA/RMC (Emlid RS+)
+│   ├── navigation/                 # Navigation algorithm layer
+│   │   ├── geo_utils.py            # Pure functions: Haversine, bearing, normalize_angle, projection
+│   │   ├── waypoint.py             # Waypoint dataclass + WaypointManager (adaptive tolerance)
+│   │   ├── gps_filter.py           # MovingAverageFilter + KalmanFilter (4D, IMU-aided)
+│   │   ├── controller.py           # PIDController, P2PController, PurePursuitController
+│   │   └── nav_engine.py           # NavigationEngine state machine (NavState/NavMode/FilterMode)
+│   ├── camera/                     # Video layer
+│   │   ├── frame_source.py         # FrameSource ABC + SimpleColorSource (OAK-D)
+│   │   └── camera_streamer.py      # MJPEGServer: streams any FrameSource over HTTP
 │   ├── robot_receiver.py           # TCP server + watchdog + serial forwarding
 │   ├── local_controller.py         # Local keyboard → serial (no TCP required)
-│   ├── frame_source.py             # FrameSource ABC + SimpleColorSource (OAK-D)
-│   ├── camera_streamer.py          # MJPEGServer: streams any FrameSource over HTTP
-│   ├── web_controller.py           # Web joystick: HTTP :8888 + WebSocket :8889 + IMU/RTK broadcast + CSV recorder
-│   ├── rtk_reader.py               # RTKReader daemon thread — NMEA GGA/RMC parser (Emlid RS+)
-│   ├── data_recorder.py            # DataRecorder — IMU+RTK+cmd CSV writer (start/stop via browser)
+│   ├── web_controller.py           # Web joystick + autonomous nav: HTTP :8888 + WS :8889
+│   ├── data_recorder.py            # DataRecorder — IMU+RTK+cmd CSV writer
 │   ├── web_static/
-│   │   ├── index.html              # Single-page HUD (nipplejs joystick + speed slider + compass + IMU + RTK panel + REC button)
+│   │   ├── index.html              # Single-page HUD: joystick + speed + compass + IMU + RTK + NAV
 │   │   └── nipplejs.min.js         # nipplejs local copy (no CDN required on LAN)
 │   ├── main.py                     # Interactive launcher menu (recommended entry point)
 │   ├── log/                        # Runtime logs (auto-created)
 │   ├── data_log/                   # CSV data recordings (auto-created on first REC)
 │   └── cam_demo/                   # OAK-D camera demo scripts
-│       ├── camera_viewer.py
-│       ├── Camera_output.py
-│       ├── Camera_multiple_outputs.py
-│       ├── Display_all_cameras.py
-│       ├── Depth_Align.py
-│       ├── Detection_network.py
-│       ├── Detection_network_Remap.py
-│       ├── Feature_Tracker.py
-│       └── IMU.py
 ├── 01_remote_side/                 # Operator PC
 │   ├── config.py                   # ROBOT_HOST, TCP/stream ports, reconnect delays
-│   ├── remote_sender.py            # pynput + TCP client + heartbeat (standalone-capable)
-│   ├── remote_viewer.py            # MJPEG pull + cv2.imshow + auto-reconnect (standalone-capable)
-│   ├── main.py                     # One-shot launcher: sender (daemon thread) + viewer (main thread)
-│   └── log/                        # Runtime logs (auto-created)
+│   ├── remote_sender.py            # pynput + TCP client + heartbeat
+│   ├── remote_viewer.py            # MJPEG pull + cv2.imshow + auto-reconnect
+│   ├── main.py                     # One-shot launcher: sender (daemon) + viewer (main thread)
+│   └── log/
 ├── CIRCUITPY/                      # Feather M4 CAN firmware (CircuitPython)
 │   ├── code.py                     # Parses serial commands (WASD + V velocity) → CAN frames
 │   └── lib/farm_ng/                # farm-ng Amiga protocol library
@@ -113,7 +123,7 @@ Full remote operation: keyboard control and live video in a single command.
 
 ```
 Remote PC ──TCP:9000──► robot_receiver.py ──serial──► Feather M4 CAN
-          ◄─HTTP:8080── camera_streamer.py ◄── FrameSource (OAK-D / YOLO / …)
+          ◄─HTTP:8080── camera/camera_streamer.py ◄── FrameSource (OAK-D / YOLO / …)
 ```
 
 ### Mode D — Web joystick control (mobile-friendly)
@@ -123,21 +133,35 @@ Provides proportional joystick input (diagonal motion supported), a live IMU / c
 RTK GPS display, and manual CSV data recording.
 
 ```
-Phone browser ──HTTP:8888──► web_static/index.html   (nipplejs joystick + speed slider + IMU HUD + RTK + REC)
+Phone browser ──HTTP:8888──► web_static/index.html   (joystick + speed slider + IMU + RTK + NAV)
               ──WS:8889────► web_controller.py ──serial──► Feather M4 CAN
               ◄─WS:8889───── web_controller.py ◄── OAK-D BNO085 IMU (20 Hz)
                                                ◄── Emlid RS+ RTK GPS  (1 Hz)
                                                ──► data_log/*.csv     (on REC)
 ```
 
-Key differences from Mode B:
-- **Proportional control**: joystick maps directly to absolute speed values — no incremental steps.
-- **Diagonal motion**: linear and angular velocity set simultaneously in a single command.
-- **Speed ratio slider**: drag the **SPEED** slider (10%–100%, default 50%) to scale joystick output in real time — useful when full speed feels too sensitive for fine manoeuvring. Scaling is purely front-end; the server-side velocity clamp still applies.
-- **IMU HUD**: linear acceleration (gravity-compensated), gyroscope, and magnetic compass rendered in the browser.
-- **RTK GPS panel**: live lat/lon/alt, fix quality badge (NO FIX / GPS / DGPS / RTK FIXED / RTK FLOAT), satellite count, HDOP, speed.
-- **CSV recording**: tap **● REC** in the browser to start logging; tap **■ STOP** to close the file. Each recording session creates a timestamped file in `data_log/`.
-- No dedicated app required — works in any modern mobile browser.
+### Mode E — Autonomous GPS waypoint navigation
+
+Draw a path in QGIS, export as CSV, upload in the browser, press **▶ AUTO**.
+The robot navigates each waypoint autonomously using RTK GPS + IMU fusion.
+
+```
+QGIS → export CSV waypoints
+          │ upload via browser (WebSocket)
+          ▼
+web_controller.py
+    └── NavigationEngine
+         ├── WaypointManager   — adaptive arrival tolerance, consecutive-frame detection
+         ├── GPS filter        — MovingAverageFilter (10-frame window) or
+         │                       KalmanFilter (4D state: position + velocity, IMU-aided at 20 Hz)
+         ├── P2PController     — direct point-to-point with PID heading control + decel ramp
+         └── PurePursuitController — lookahead-point path tracking (smooth curves)
+              │
+              └── V commands (20 Hz) → serial → Feather M4 CAN → Amiga Dashboard
+```
+
+Joystick is automatically disabled during autonomous navigation.
+The browser shows real-time progress: waypoint index, distance to target, bearing, and fix quality.
 
 ---
 
@@ -163,20 +187,48 @@ S:ACTIVE\n   — request_state set to AUTO_ACTIVE
 S:READY\n    — request_state set to AUTO_READY
 ```
 
-On startup the firmware also sends `S:READY\n` once so the host can synchronise.
-`web_controller.py` parses these lines in a dedicated `SerialReader` daemon thread and
-broadcasts a `state_status` WebSocket message to all connected browser clients.
-
 ### V command (new, absolute velocity)
 
 ```
 Format:  "V{speed:.2f},{angular:.2f}\n"
 Example: "V0.50,-0.30\n"   →  forward 0.5 m/s, turn right 0.3 rad/s
          "V0.00,0.00\n"    →  emergency stop
-         "V-0.30,0.20\n"   →  reverse + turn left (diagonal motion)
+         "V-0.30,0.20\n"   →  reverse + turn left
 ```
 
 Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are active simultaneously.
+
+---
+
+## WebSocket Protocol (browser ↔ web_controller.py)
+
+### Client → Server
+
+| `type`              | Payload                                         | Description                          |
+|---------------------|-------------------------------------------------|--------------------------------------|
+| `heartbeat`         | —                                               | Keeps watchdog alive                 |
+| `joystick`          | `{linear, angular, force}`                      | Proportional velocity command        |
+| `toggle_state`      | —                                               | Toggle AUTO_READY ↔ AUTO_ACTIVE      |
+| `toggle_record`     | —                                               | Start / stop CSV recording           |
+| `upload_waypoints`  | `{csv: "id,lat,lon,tolerance_m,max_speed\n…"}` | Upload QGIS waypoint CSV             |
+| `nav_start`         | —                                               | Begin autonomous navigation          |
+| `nav_stop`          | —                                               | Stop autonomous navigation           |
+| `nav_mode`          | `{mode: "p2p" \| "pure_pursuit"}`              | Switch navigation algorithm          |
+| `filter_mode`       | `{mode: "moving_avg" \| "kalman"}`             | Switch GPS filter                    |
+
+### Server → Client
+
+| `type`             | Key fields                                                      | Description                       |
+|--------------------|-----------------------------------------------------------------|-----------------------------------|
+| `imu`              | `accel, gyro, compass`                                          | 20 Hz IMU broadcast               |
+| `rtk`              | `lat, lon, alt, fix_quality, num_sats, hdop`                   | 1 Hz RTK GPS broadcast            |
+| `state_status`     | `{active: bool}`                                                | Firmware AUTO state change        |
+| `record_status`    | `{recording, filename}`                                         | CSV recording state change        |
+| `status`           | `{serial_ok, imu_ok, rtk_ok, recording}`                       | 2 Hz system health                |
+| `waypoints_loaded` | `{count: N}`                                                    | CSV parse result                  |
+| `nav_status`       | `{state, progress:[i,n], distance_m, target_bearing, nav_mode, filter_mode, tolerance_m}` | ~4 Hz navigation status |
+| `nav_complete`     | `{total_wp: N}`                                                 | All waypoints reached             |
+| `nav_warning`      | `{msg: "GPS timeout"}`                                          | Navigation paused due to GPS loss |
 
 ---
 
@@ -200,7 +252,7 @@ Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are act
 
 ```bash
 # Robot side (Mac Mini / Linux)
-pip install pyserial depthai opencv-python websockets
+pip install pyserial depthai opencv-python websockets numpy
 
 # Remote side (operator PC)
 pip install pynput opencv-python
@@ -225,18 +277,24 @@ pip install pynput opencv-python
 | `CAM2_STREAM_PORT`    | `8081`                     | same               | Camera 2 MJPEG stream port         |
 | `MJPEG_QUALITY`       | `80`                       | same               | JPEG encoding quality (1–100)      |
 | `LOCAL_DISPLAY`       | `0` (off)                  | same               | Set `1` for local preview window   |
-| `CAM_SELECTION`       | `1`                        | same               | Camera selection: `"1"`, `"2"`, or `"both"` (set by launcher menu) |
-| `DEVICE_IP`           | *(auto-detect)*            | same               | Force cam_demo scripts to connect to a specific OAK-D PoE IP (set by launcher menu) |
 | `WEB_HTTP_PORT`       | `8888`                     | same               | Web joystick HTTP port             |
 | `WEB_WS_PORT`         | `8889`                     | same               | Web joystick WebSocket port        |
-| `MAX_LINEAR_VEL`      | `1.0` m/s                  | same               | Joystick maximum linear velocity   |
-| `MAX_ANGULAR_VEL`     | `1.0` rad/s                | same               | Joystick maximum angular velocity  |
-| `COORD_SYSTEM`        | `NED`                      | same               | IMU coordinate frame for compass: `NED` (x=North) or `ENU` (x=East) |
+| `MAX_LINEAR_VEL`      | `1.0` m/s                  | same               | Maximum linear velocity            |
+| `MAX_ANGULAR_VEL`     | `1.0` rad/s                | same               | Maximum angular velocity           |
+| `COORD_SYSTEM`        | `NED`                      | same               | IMU coordinate frame: `NED` or `ENU` |
 | `RTK_PORT`            | `/dev/cu.usbmodem2403`     | same               | Emlid RS+ serial port              |
 | `RTK_BAUD`            | `9600`                     | same               | RTK GPS baud rate                  |
 | `RTK_TIMEOUT`         | `1.0` s                    | same               | Serial readline timeout            |
-| `RTK_ENABLED`         | `1` (on)                   | same               | Set `0` to disable RTK entirely    |
+| `RTK_ENABLED`         | `1` (on)                   | same               | Set `0` to disable RTK             |
 | `DATA_LOG_DIR`        | `data_log`                 | same               | Directory for CSV recordings       |
+| `NAV_LOOKAHEAD_M`     | `2.0` m                    | same               | Pure Pursuit lookahead distance    |
+| `NAV_DECEL_RADIUS_M`  | `3.0` m                    | same               | Distance at which robot starts slowing down |
+| `NAV_ARRIVE_FRAMES`   | `5`                        | same               | Consecutive frames inside tolerance to confirm arrival |
+| `NAV_GPS_TIMEOUT_S`   | `5.0` s                    | same               | Pause navigation if no GPS for this duration |
+| `NAV_PID_KP`          | `0.8`                      | same               | Heading PID proportional gain      |
+| `NAV_PID_KI`          | `0.01`                     | same               | Heading PID integral gain          |
+| `NAV_PID_KD`          | `0.05`                     | same               | Heading PID derivative gain        |
+| `NAV_MA_WINDOW`       | `10`                       | same               | Moving-average GPS filter window   |
 
 ### Remote side (`01_remote_side/config.py`)
 
@@ -277,69 +335,69 @@ python main.py
 =======================================================
 ```
 
-- Option **2**: prompts for camera selection, then starts `local_controller.py` + `Camera_multiple_outputs.py`. With **both**, opens two `Camera_multiple_outputs.py` windows in parallel (one per camera, each with its own `DEVICE_IP`).
-- Option **4**: prompts for camera selection, then starts `robot_receiver.py` + `camera_streamer.py` in parallel. Press `Ctrl+C` to stop both.
-- Option **5**: prompts for camera selection, then enters the local camera test sub-menu. With **both**, any selected demo launches two parallel processes—one for CAM1, one for CAM2.
-- Option **6**: starts `web_controller.py`. Open `http://<robot-ip>:8888/` on your phone.
+- Option **6**: starts `web_controller.py`. Open `http://<robot-ip>:8888/` on your phone — joystick control, IMU/RTK HUD, CSV recording, and autonomous navigation all in one page.
 
-**Camera selection prompt (options 2 / 4 / 5):**
-
-```
-────────────────────────────
-  Select Camera
-────────────────────────────
-  1. Camera 1  (IP: 10.95.76.10)
-  2. Camera 2  (IP: 10.95.76.11)
-  3. Both cameras
-────────────────────────────
-  Choice [1/2/3]:
-```
-
-| Selection | `camera_streamer.py` ports  | `DEVICE_IP` injected                              |
-|-----------|-----------------------------|---------------------------------------------------|
-| 1         | CAM1 → :8080                | `10.95.76.10`                                     |
-| 2         | CAM2 → :8080                | `10.95.76.11`                                     |
-| both      | CAM1 → :8080, CAM2 → :8081 | per-process: CAM1_IP to process 1, CAM2_IP to process 2 |
-
-### Web joystick (Mode D)
+### Web joystick + autonomous navigation (Mode D / E)
 
 ```bash
 # Robot side
 cd m2_system/00_robot_side
 python web_controller.py
-# Logs will print the robot's LAN IP address
 
-# Phone / tablet — open in browser (same LAN)
+# Browser (same LAN)
 http://<robot-ip>:8888/
 ```
 
-The joystick maps to proportional speed:
+**Manual control (Mode D):**
 
 ```
 force < 0.15              → dead zone, robot stops
 joystick up               → forward  (linear = +force × MAX_LINEAR_VEL × speed_ratio)
-joystick right + up       → forward + turn right (diagonal motion)
+joystick up + right       → forward + turn right (diagonal motion)
 release joystick          → immediate stop
 disconnect / no heartbeat → watchdog stops robot after 2 s
 ```
 
-Speed ratio slider (SPEED bar, above joystick zone):
+**Autonomous navigation (Mode E):**
 
-```
-range    : 10% – 100%, step 10%, default 50%
-effect   : scales both linear and angular output before sending to server
-use case : reduce to 20–30% for precise positioning; increase to 100% for fast travel
+1. Draw a path in QGIS and export as CSV with columns: `id,lat,lon,tolerance_m,max_speed`
+2. In the browser, tap **📂 UPLOAD CSV** and select the file
+3. Confirm waypoint count displayed next to the button
+4. Choose navigation algorithm (**P2P** or **PURSUIT**) and GPS filter (**MOV-AVG** or **KALMAN**)
+5. Verify RTK fix quality ≥ 1 in the RTK panel
+6. Tap **▶ AUTO** — the joystick zone shows "AUTO MODE" and is disabled
+7. Monitor progress in the navigation status panel (waypoint index, distance, bearing)
+8. On completion the robot stops automatically; tap **■ STOP** at any time to abort
+
+**CSV waypoint format:**
+
+```csv
+id,lat,lon,tolerance_m,max_speed
+0,30.12345,120.98765,1.0,0.5
+1,30.12400,120.98800,1.0,0.5
+2,30.12460,120.98840,1.5,0.3
 ```
 
-RTK GPS and data recording:
+| Column        | Unit | Description                                                       |
+|---------------|------|-------------------------------------------------------------------|
+| `id`          | —    | Sequential index (0-based)                                        |
+| `lat` / `lon` | °    | WGS-84 decimal degrees                                            |
+| `tolerance_m` | m    | Arrival radius (auto-tightened to 0.5 m with RTK fix, 2.0 m float) |
+| `max_speed`   | m/s  | Maximum forward speed for this waypoint segment                   |
 
-```
-RTK panel (top of page)   → shows lat / lon / alt / fix quality / sats / HDOP / speed
-● REC button              → starts a new CSV in data_log/robot_data_YYYYMMDD_HHMMSS.csv
-■ STOP button             → closes the file
-```
+**Navigation algorithms:**
 
-CSV columns: `timestamp, accel_x/y/z, gyro_x/y/z, compass_bearing, lat, lon, alt, fix_quality, num_sats, hdop, linear_cmd, angular_cmd`
+| Mode          | Behaviour                                                                |
+|---------------|--------------------------------------------------------------------------|
+| **P2P**       | Points directly at each waypoint; PID heading control + deceleration ramp |
+| **PURSUIT**   | Tracks a lookahead point on the path segment; produces smoother curves   |
+
+**GPS filters:**
+
+| Filter      | Behaviour                                                                    |
+|-------------|------------------------------------------------------------------------------|
+| **MOV-AVG** | Simple sliding-window mean (window = `NAV_MA_WINDOW`, requires 10 GPS fixes to warm up) |
+| **KALMAN**  | 4D Kalman filter (position + velocity); IMU accelerometer aids prediction at 20 Hz |
 
 ### Remote side — all-in-one
 
@@ -349,31 +407,15 @@ cd m2_system/01_remote_side
 python main.py
 ```
 
-- The cv2 window shows the live camera feed.
-- With keyboard focus on the terminal, use `wasd` to drive the robot.
-- Press `q` in the terminal, or close the video window, to quit everything.
-
-### Remote side — individual components
-
-```bash
-export ROBOT_HOST=192.168.x.x
-
-# Control only
-python remote_sender.py
-
-# Video only
-python remote_viewer.py
-```
-
 ---
 
 ## Extending the Video Pipeline (FrameSource)
 
-`camera_streamer.py` decouples *frame content* from *transport*.
+`camera/camera_streamer.py` decouples *frame content* from *transport*.
 Swap in a new pipeline by subclassing `FrameSource` — the `MJPEGServer` and all remote-side code stay unchanged.
 
 ```python
-# 00_robot_side/frame_source.py
+# 00_robot_side/camera/frame_source.py
 class FrameSource(ABC):
     def open(self) -> None: ...
     def close(self) -> None: ...
@@ -389,27 +431,6 @@ class DepthAlignSource(FrameSource): ...    # colour + depth side-by-side
 
 ---
 
-## Local Camera Tests (menu option 5)
-
-Selecting option **5** first shows the camera selection prompt, then enters the sub-menu.
-The chosen camera's IP is injected as `DEVICE_IP` into each demo script.
-
-| Option | Function                                    |
-|--------|---------------------------------------------|
-| 1      | Simple viewer (300×300, CAM_A)              |
-| 2      | All cameras, full resolution                |
-| 3      | Multi-output (300×300, CAM_A / B / C)       |
-| 4      | Depth Align demo                            |
-| 5      | YOLO object detection demo                  |
-
-All scripts in `cam_demo/` read `DEVICE_IP` from the environment:
-- Single camera (1 or 2) → one process launched with `DEVICE_IP` set to the chosen camera's IP.
-- **Both cameras** → two processes launched in parallel; each receives its own `DEVICE_IP` (`CAM1_IP` / `CAM2_IP`), producing two independent display windows.
-
-Additional demo scripts are in the `cam_demo/` directory (IMU, feature tracking, etc.).
-
----
-
 ## Feather M4 CAN Firmware
 
 - **Path**: `CIRCUITPY/code.py`
@@ -421,11 +442,10 @@ Workflow:
 1. Listen on USB serial (115200 baud).
 2. Parse commands from two protocols simultaneously:
    - **WASD** (single-byte): `w/s/a/d/space/\r` → incremental speed adjustment
-   - **V command** (multi-byte line): `V{speed},{angular}\n` → absolute velocity (set by web joystick)
+   - **V command** (multi-byte line): `V{speed},{angular}\n` → absolute velocity
 3. Send CAN RPDO1 frame at 20 Hz with current `cmd_speed` + `cmd_ang_rate`.
 4. Receive TPDO1 status frames from the Amiga Dashboard to sync control state.
 5. **Reply to `\r`** with `S:ACTIVE\n` or `S:READY\n` so the host always knows the actual AUTO state.
-   On startup, send `S:READY\n` once to initialise the host-side state.
 
 ---
 
@@ -440,30 +460,33 @@ Workflow:
 | WS disconnect stop      | `web_controller.py` sends `V0.00,0.00\n` when browser disconnects    |
 | Joystick dead zone      | `force < 0.15` → zero velocity command sent                           |
 | Velocity clamp          | Firmware clamps V command values to `[-1.0, 1.0]`                    |
-| Firmware state sync     | AUTO toggle is confirmed by firmware serial reply (`S:ACTIVE`/`S:READY`); UI state always reflects actual firmware state. Firmware restart auto-resynchronises via `S:READY\n` on boot. |
+| Joystick disabled in AUTO | Navigation mode blocks joystick messages from reaching the serial port |
+| GPS timeout stop        | If no valid GPS for `NAV_GPS_TIMEOUT_S` (5 s), navigation pauses and robot stops |
+| Firmware state sync     | AUTO toggle confirmed by firmware serial reply; UI always reflects actual firmware state |
 | Exception logging       | All exceptions are logged; silent swallowing is forbidden             |
 
 ---
 
 ## Logs
 
-| Script                      | Log file                                    |
-|-----------------------------|---------------------------------------------|
-| `main.py` (robot side)      | `00_robot_side/log/robot_main.log`          |
-| `local_controller.py`       | `00_robot_side/log/local_controller.log`    |
-| `robot_receiver.py`         | `00_robot_side/log/robot_receiver.log`      |
-| `camera_streamer.py`        | `00_robot_side/log/camera_streamer.log`     |
-| `web_controller.py`         | `00_robot_side/log/web_controller.log`      |
-| `rtk_reader.py`             | `00_robot_side/log/rtk_reader.log`          |
-| `data_recorder.py`          | `00_robot_side/log/data_recorder.log`       |
-| `main.py` (remote side)     | `01_remote_side/log/main.log`               |
-| `remote_sender.py`          | `01_remote_side/log/remote_sender.log`      |
-| `remote_viewer.py`          | `01_remote_side/log/remote_viewer.log`      |
+| Script / Module              | Log file                                    |
+|------------------------------|---------------------------------------------|
+| `main.py` (robot side)       | `00_robot_side/log/robot_main.log`          |
+| `local_controller.py`        | `00_robot_side/log/local_controller.log`    |
+| `robot_receiver.py`          | `00_robot_side/log/robot_receiver.log`      |
+| `camera/camera_streamer.py`  | `00_robot_side/log/camera_streamer.log`     |
+| `web_controller.py`          | `00_robot_side/log/web_controller.log`      |
+| `sensors/rtk_reader.py`      | (logs via root logger to web_controller.log)|
+| `navigation/*`               | (logs via root logger to web_controller.log)|
+| `data_recorder.py`           | `00_robot_side/log/data_recorder.log`       |
+| `main.py` (remote side)      | `01_remote_side/log/main.log`               |
+| `remote_sender.py`           | `01_remote_side/log/remote_sender.log`      |
+| `remote_viewer.py`           | `01_remote_side/log/remote_viewer.log`      |
 
 Log format:
 
 ```
 2025-01-01 12:00:00,000 [INFO] TCP server listening on 0.0.0.0:9000
-2025-01-01 12:00:01,500 [INFO] Remote client connected: ('192.168.1.50', 54321)
-2025-01-01 12:00:01,600 [INFO] MJPEG server started → http://0.0.0.0:8080/
+2025-01-01 12:00:01,500 [INFO] NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
+2025-01-01 12:00:15,200 [INFO] WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
 ```

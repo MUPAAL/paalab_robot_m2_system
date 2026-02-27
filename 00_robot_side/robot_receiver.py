@@ -21,8 +21,8 @@ from config import (
     TCP_PORT,
     WATCHDOG_TIMEOUT,
 )
-from serial_writer import SerialWriter
-from watchdog import Watchdog
+from core.serial_writer import SerialWriter
+from core.watchdog import Watchdog
 
 # ── Logging configuration ──────────────────────────────────
 _py_name = Path(__file__).stem

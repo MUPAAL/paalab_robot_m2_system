@@ -21,8 +21,6 @@ Usage:
 import asyncio
 import json
 import logging
-import math
-import os
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -39,8 +37,11 @@ from config import (
     RTK_PORT, RTK_BAUD, RTK_ENABLED,
     DATA_LOG_DIR,
 )
-from rtk_reader    import RTKReader
+from sensors.rtk_reader import RTKReader
+from sensors.imu_reader import IMUReader
+import sensors.imu_reader as _imu_mod
 from data_recorder import DataRecorder
+from navigation.nav_engine import NavigationEngine, NavMode, FilterMode
 
 # ── Logging ────────────────────────────────────────────────
 _py_name = Path(__file__).stem
@@ -58,21 +59,6 @@ logger = logging.getLogger(__name__)
 # ── Static files directory ────────────────────────────────
 STATIC_DIR = Path(__file__).parent / "web_static"
 
-# ── IMU data store (thread-safe via lock) ─────────────────
-_imu_lock = threading.Lock()
-_imu_data: dict = {
-    "accel": {"x": 0.0, "y": 0.0, "z": 0.0},
-    "gyro":  {"x": 0.0, "y": 0.0, "z": 0.0},
-    "compass": {
-        "bearing": 0.0, "cardinal": "N",
-        "calibrated": False,
-        "accuracy": 0,
-        "quat": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
-    },
-    "ts": 0.0,
-}
-_imu_available = False  # True once depthai pipeline is running
-
 # ── RTK reader (global, started in main()) ────────────────
 _rtk_reader: RTKReader | None = None
 
@@ -83,102 +69,6 @@ _data_recorder: DataRecorder | None = None
 _vel_lock   = threading.Lock()
 _last_linear:  float = 0.0
 _last_angular: float = 0.0
-
-
-# ── Quaternion → compass bearing ──────────────────────────
-def quaternion_to_compass(real: float, i: float, j: float, k: float) -> tuple[float, str]:
-    """Convert BNO085 ROTATION_VECTOR quaternion to compass bearing [0, 360).
-
-    0 = magnetic north, clockwise positive.
-    Coordinate system selectable via COORD_SYSTEM env var (default: NED).
-    """
-    coord = os.environ.get("COORD_SYSTEM", "NED").upper()
-    yaw_rad = math.atan2(2 * (real * k + i * j), 1 - 2 * (j * j + k * k))
-    if coord == "ENU":
-        # ENU: yaw is measured counter-clockwise from East; convert to clockwise-from-North bearing
-        bearing = (90.0 - math.degrees(yaw_rad)) % 360.0
-    else:
-        # NED: yaw is already a clockwise-from-North bearing
-        bearing = math.degrees(yaw_rad) % 360.0
-    cardinals = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-    cardinal  = cardinals[int((bearing + 22.5) / 45.0) % 8]
-    return bearing, cardinal
-
-
-# ── IMU reader thread (depthai OAK-D) ────────────────────
-class IMUReader(threading.Thread):
-    """Daemon thread: continuously reads IMU packets from OAK-D and updates _imu_data."""
-
-    def __init__(self) -> None:
-        super().__init__(name="IMUReader", daemon=True)
-
-    def run(self) -> None:
-        global _imu_available
-        try:
-            import depthai as dai
-        except ImportError:
-            logger.warning("depthai not installed — IMU unavailable, HUD will show zeros")
-            return
-
-        try:
-            with dai.Pipeline() as pipeline:
-                imu_node = pipeline.create(dai.node.IMU)
-                imu_node.enableIMUSensor(dai.IMUSensor.LINEAR_ACCELERATION, 400)
-                imu_node.enableIMUSensor(dai.IMUSensor.GYROSCOPE_RAW, 400)
-                imu_node.enableIMUSensor(dai.IMUSensor.ROTATION_VECTOR, 100)
-                imu_node.setBatchReportThreshold(1)
-                imu_node.setMaxBatchReports(10)
-
-                imu_queue = imu_node.out.createOutputQueue(maxSize=50, blocking=False)
-                pipeline.start()
-                _imu_available = True
-                logger.info("IMUReader: depthai IMU pipeline started")
-
-                while pipeline.isRunning():
-                    try:
-                        imu_data_pkt = imu_queue.get()
-                        if imu_data_pkt is None:
-                            continue
-                        for pkt in imu_data_pkt.packets:
-                            self._process_packet(pkt)
-                    except Exception as e:
-                        logger.error(f"IMUReader: failed to read packet: {e}")
-
-        except Exception as e:
-            logger.error(f"IMUReader: depthai pipeline failed to start: {e}")
-            _imu_available = False
-
-    def _process_packet(self, pkt) -> None:
-        global _imu_data
-        try:
-            accel = pkt.acceleroMeter
-            gyro  = pkt.gyroscope
-            rot   = pkt.rotationVector
-
-            w, xi, yj, zk = rot.real, rot.i, rot.j, rot.k
-            try:
-                accuracy = int(rot.accuracy)  # 0-3: BNO085 calibration accuracy
-            except (AttributeError, TypeError, ValueError):
-                # Fallback: infer from all-zero quaternion check
-                accuracy = 0 if (w == 0.0 and xi == 0.0 and yj == 0.0 and zk == 0.0) else 3
-            calibrated = accuracy >= 2
-            bearing, cardinal = quaternion_to_compass(w, xi, yj, zk) if calibrated else (0.0, "N")
-
-            with _imu_lock:
-                _imu_data = {
-                    "accel": {"x": accel.x, "y": accel.y, "z": accel.z},
-                    "gyro":  {"x": gyro.x,  "y": gyro.y,  "z": gyro.z},
-                    "compass": {
-                        "bearing": bearing,
-                        "cardinal": cardinal,
-                        "calibrated": calibrated,
-                        "accuracy": accuracy,
-                        "quat": {"w": w, "x": xi, "y": yj, "z": zk},
-                    },
-                    "ts": time.time(),
-                }
-        except Exception as e:
-            logger.error(f"IMUReader: packet processing error: {e}")
 
 
 # ── HTTP static file server ───────────────────────────────
@@ -239,6 +129,7 @@ class WebController:
         self._serial_ok = False
         self._auto_active = False  # tracks current AUTO state (updated by serial reader thread)
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._nav_engine: NavigationEngine | None = None
 
     # ── Serial ────────────────────────────────────────────
     def open_serial(self) -> None:
@@ -381,15 +272,21 @@ class WebController:
 
                 elif msg_type == "joystick":
                     self._last_heartbeat = time.time()  # joystick messages also reset watchdog
-                    try:
-                        linear  = float(msg.get("linear",  0.0))
-                        angular = float(msg.get("angular", 0.0))
-                        # Clamp to configured velocity limits
-                        linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
-                        angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
-                        self._send_velocity(linear, angular)
-                    except (TypeError, ValueError) as e:
-                        logger.warning(f"WebSocket: malformed joystick message: {e}")
+                    # 自动导航中忽略摇杆
+                    nav_active = (
+                        self._nav_engine is not None
+                        and self._nav_engine.get_status().get("state") == "navigating"
+                    )
+                    if not nav_active:
+                        try:
+                            linear  = float(msg.get("linear",  0.0))
+                            angular = float(msg.get("angular", 0.0))
+                            # Clamp to configured velocity limits
+                            linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
+                            angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
+                            self._send_velocity(linear, angular)
+                        except (TypeError, ValueError) as e:
+                            logger.warning(f"WebSocket: malformed joystick message: {e}")
 
                 elif msg_type == "toggle_state":
                     self._last_heartbeat = time.time()
@@ -399,6 +296,21 @@ class WebController:
 
                 elif msg_type == "toggle_record":
                     await self._handle_toggle_record()
+
+                elif msg_type == "upload_waypoints":
+                    await self._handle_upload_waypoints(msg)
+
+                elif msg_type == "nav_start":
+                    await self._handle_nav_start()
+
+                elif msg_type == "nav_stop":
+                    await self._handle_nav_stop()
+
+                elif msg_type == "nav_mode":
+                    await self._handle_nav_mode(msg)
+
+                elif msg_type == "filter_mode":
+                    await self._handle_filter_mode(msg)
 
         except websockets.exceptions.ConnectionClosedError:
             pass
@@ -448,12 +360,76 @@ class WebController:
             except Exception:
                 pass
 
+    # ── Navigation handlers ───────────────────────────────
+    async def _handle_upload_waypoints(self, msg: dict) -> None:
+        """处理客户端上传的 CSV 航点文本。"""
+        if self._nav_engine is None:
+            return
+        csv_text = msg.get("csv", "")
+        if not isinstance(csv_text, str) or not csv_text.strip():
+            logger.warning("WebSocket: upload_waypoints: CSV 为空")
+            await self._broadcast({"type": "waypoints_loaded", "count": 0, "error": "empty CSV"})
+            return
+        try:
+            count = self._nav_engine.load_waypoints(csv_text)
+            await self._broadcast({"type": "waypoints_loaded", "count": count})
+            logger.info(f"WebSocket: 航点已加载，共 {count} 个")
+        except Exception as e:
+            logger.error(f"WebSocket: 航点加载失败: {e}")
+            await self._broadcast({"type": "waypoints_loaded", "count": 0, "error": str(e)})
+
+    async def _handle_nav_start(self) -> None:
+        """处理导航开始指令。"""
+        if self._nav_engine is None:
+            return
+        ok = self._nav_engine.start()
+        if not ok:
+            status = self._nav_engine.get_status()
+            await self._broadcast({
+                "type":  "nav_status",
+                "error": "无法启动导航（无航点或 GPS 信号不足）",
+                **status,
+            })
+        else:
+            await self._broadcast(self._nav_engine.get_status())
+
+    async def _handle_nav_stop(self) -> None:
+        """处理导航停止指令。"""
+        if self._nav_engine is None:
+            return
+        self._nav_engine.stop()
+        await self._broadcast(self._nav_engine.get_status())
+
+    async def _handle_nav_mode(self, msg: dict) -> None:
+        """切换导航算法模式（p2p / pure_pursuit）。"""
+        if self._nav_engine is None:
+            return
+        mode_str = msg.get("mode", "")
+        try:
+            mode = NavMode(mode_str)
+            self._nav_engine.set_nav_mode(mode)
+            await self._broadcast(self._nav_engine.get_status())
+        except ValueError:
+            logger.warning(f"WebSocket: 未知导航模式: {mode_str!r}")
+
+    async def _handle_filter_mode(self, msg: dict) -> None:
+        """切换 GPS 滤波器模式（moving_avg / kalman）。"""
+        if self._nav_engine is None:
+            return
+        mode_str = msg.get("mode", "")
+        try:
+            mode = FilterMode(mode_str)
+            self._nav_engine.set_filter_mode(mode)
+            await self._broadcast(self._nav_engine.get_status())
+        except ValueError:
+            logger.warning(f"WebSocket: 未知滤波器模式: {mode_str!r}")
+
     # ── IMU broadcast loop (20 Hz) ────────────────────────
     async def _imu_broadcast_loop(self) -> None:
         while True:
             await asyncio.sleep(0.05)  # 20 Hz
-            with _imu_lock:
-                data = dict(_imu_data)
+            with _imu_mod.imu_lock:
+                data = dict(_imu_mod.imu_data)
             msg = json.dumps({
                 "type": "imu",
                 "ts":    data["ts"],
@@ -463,17 +439,19 @@ class WebController:
             })
             async with self._clients_lock:
                 clients = set(self._clients)
-            if not clients:
-                continue
-            dead = set()
-            for ws in clients:
-                try:
-                    await ws.send(msg)
-                except Exception:
-                    dead.add(ws)
-            if dead:
-                async with self._clients_lock:
-                    self._clients -= dead
+            if clients:
+                dead = set()
+                for ws in clients:
+                    try:
+                        await ws.send(msg)
+                    except Exception:
+                        dead.add(ws)
+                if dead:
+                    async with self._clients_lock:
+                        self._clients -= dead
+            # 导航引擎 IMU 回调（20 Hz 驱动控制循环）
+            if self._nav_engine is not None:
+                self._nav_engine.on_imu(data)
 
     # ── Watchdog loop ─────────────────────────────────────
     async def _watchdog_loop(self) -> None:
@@ -512,17 +490,19 @@ class WebController:
             })
             async with self._clients_lock:
                 clients = set(self._clients)
-            if not clients:
-                continue
-            dead = set()
-            for ws in clients:
-                try:
-                    await ws.send(msg)
-                except Exception:
-                    dead.add(ws)
-            if dead:
-                async with self._clients_lock:
-                    self._clients -= dead
+            if clients:
+                dead = set()
+                for ws in clients:
+                    try:
+                        await ws.send(msg)
+                    except Exception:
+                        dead.add(ws)
+                if dead:
+                    async with self._clients_lock:
+                        self._clients -= dead
+            # 导航引擎 RTK 回调（1 Hz 更新 GPS 滤波器）
+            if self._nav_engine is not None:
+                self._nav_engine.on_rtk(snap)
 
     # ── Data record loop (5 Hz) ───────────────────────────
     async def _data_record_loop(self) -> None:
@@ -530,8 +510,8 @@ class WebController:
             await asyncio.sleep(0.2)  # 5 Hz
             if _data_recorder is None or not _data_recorder.is_recording:
                 continue
-            with _imu_lock:
-                imu_snap = dict(_imu_data)
+            with _imu_mod.imu_lock:
+                imu_snap = dict(_imu_mod.imu_data)
             rtk_snap = _rtk_reader.get_data() if _rtk_reader is not None else {}
             with _vel_lock:
                 linear  = _last_linear
@@ -547,10 +527,10 @@ class WebController:
             msg = json.dumps({
                 "type":       "status",
                 "serial_ok":  self._serial_ok,
-                "imu_ok":     _imu_available,
+                "imu_ok":     _imu_mod.imu_available,
                 "rtk_ok":     rtk_ok,
                 "recording":  recording,
-                "message":    "OK" if (self._serial_ok and _imu_available) else "DEGRADED",
+                "message":    "OK" if (self._serial_ok and _imu_mod.imu_available) else "DEGRADED",
             })
             async with self._clients_lock:
                 clients = set(self._clients)
@@ -565,6 +545,14 @@ class WebController:
         self._loop = asyncio.get_running_loop()
         self._last_heartbeat = time.time()
         self._start_serial_reader()  # start daemon thread to read firmware state reports
+
+        # 初始化导航引擎
+        self._nav_engine = NavigationEngine(
+            send_velocity_fn=self._send_velocity,
+            broadcast_fn=self._broadcast,
+            loop=self._loop,
+        )
+        logger.info("NavigationEngine initialized")
 
         async with websockets.serve(
             self._ws_handler,

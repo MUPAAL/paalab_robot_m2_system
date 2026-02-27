@@ -66,3 +66,13 @@ RTK_ENABLED: bool  = os.environ.get("RTK_ENABLED", "1") == "1"
 
 # ── Data recording ─────────────────────────────────────────
 DATA_LOG_DIR: str = os.environ.get("DATA_LOG_DIR", "data_log")
+
+# ── Navigation ─────────────────────────────────────────────
+NAV_LOOKAHEAD_M:    float = float(os.environ.get("NAV_LOOKAHEAD_M",    "2.0"))
+NAV_DECEL_RADIUS_M: float = float(os.environ.get("NAV_DECEL_RADIUS_M", "3.0"))
+NAV_ARRIVE_FRAMES:  int   = int(os.environ.get("NAV_ARRIVE_FRAMES",    "5"))
+NAV_GPS_TIMEOUT_S:  float = float(os.environ.get("NAV_GPS_TIMEOUT_S",  "5.0"))
+NAV_PID_KP:         float = float(os.environ.get("NAV_PID_KP",         "0.8"))
+NAV_PID_KI:         float = float(os.environ.get("NAV_PID_KI",         "0.01"))
+NAV_PID_KD:         float = float(os.environ.get("NAV_PID_KD",         "0.05"))
+NAV_MA_WINDOW:      int   = int(os.environ.get("NAV_MA_WINDOW",        "10"))

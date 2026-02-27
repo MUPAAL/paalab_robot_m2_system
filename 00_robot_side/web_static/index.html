@@ -224,6 +224,89 @@
     min-width: 40px; text-align: right;
     color: var(--accent); font-weight: bold;
   }
+
+  /* ── Nav panel ──────────────────────────────────────── */
+  #nav-panel {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  #nav-title { color: var(--accent); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; white-space: nowrap; }
+  #nav-upload-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: #1e2d3d; color: var(--dim);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px; cursor: pointer;
+    white-space: nowrap;
+  }
+  #nav-upload-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #nav-wp-count { color: var(--dim); font-size: 11px; white-space: nowrap; min-width: 50px; }
+
+  .nav-mode-btn {
+    padding: 4px 8px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: #1e2d3d; color: var(--dim);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px; cursor: pointer; letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  .nav-mode-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.08); }
+
+  #nav-auto-btn {
+    padding: 5px 14px;
+    border: none; outline: none;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px; font-weight: bold; letter-spacing: 1.5px;
+    cursor: pointer; border-radius: 3px;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  #nav-auto-btn.nav-idle    { background: #1e2d3d; color: var(--dim);   border: 1px solid var(--border); }
+  #nav-auto-btn.nav-active  { background: #0a1a0e; color: var(--green); border: 1px solid var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.3); }
+
+  /* Nav status panel */
+  #nav-status-panel {
+    display: none;
+    background: #0d1a10;
+    border-bottom: 1px solid #1e3d28;
+    padding: 6px 10px;
+    flex-shrink: 0;
+  }
+  #nav-status-panel.visible { display: block; }
+  #nav-status-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 3px 8px;
+  }
+  .nav-cell { display: flex; flex-direction: column; }
+  .nav-cell-label { color: #5a8070; font-size: 9px; letter-spacing: 0.5px; }
+  .nav-cell-val   { color: var(--text); font-size: 11px; }
+  .nav-cell-val.green { color: var(--green); }
+
+  /* AUTO MODE joystick overlay */
+  #auto-overlay {
+    display: none;
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.7);
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 6px;
+    z-index: 10;
+    pointer-events: all;
+    touch-action: none;
+  }
+  #auto-overlay.visible { display: flex; }
+  #auto-overlay-text {
+    color: var(--green); font-size: 16px; font-weight: bold;
+    letter-spacing: 3px;
+    text-shadow: 0 0 12px var(--green);
+  }
+  #auto-overlay-sub { color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+
+  /* Hidden file input */
+  #csv-file-input { display: none; }
 </style>
 </head>
 <body>
@@ -345,6 +428,49 @@
     <span id="rec-filename">—</span>
   </div>
 
+  <!-- Navigation control panel -->
+  <div id="nav-panel">
+    <span id="nav-title">AUTO NAV</span>
+    <input type="file" id="csv-file-input" accept=".csv,text/csv">
+    <button id="nav-upload-btn">📂 UPLOAD CSV</button>
+    <span id="nav-wp-count">0 WP</span>
+    <button class="nav-mode-btn active" id="btn-p2p" title="点对点直接导航">P2P</button>
+    <button class="nav-mode-btn" id="btn-pursuit" title="Pure Pursuit 路径跟踪">PURSUIT</button>
+    <button class="nav-mode-btn active" id="btn-mavg" title="移动均值 GPS 平滑">MOV-AVG</button>
+    <button class="nav-mode-btn" id="btn-kalman" title="卡尔曼滤波 GPS+IMU 融合">KALMAN</button>
+    <button id="nav-auto-btn" class="nav-idle">▶ AUTO</button>
+  </div>
+
+  <!-- Navigation status panel (仅导航中显示) -->
+  <div id="nav-status-panel">
+    <div id="nav-status-grid">
+      <div class="nav-cell">
+        <span class="nav-cell-label">PROGRESS</span>
+        <span class="nav-cell-val green" id="nav-progress">—</span>
+      </div>
+      <div class="nav-cell">
+        <span class="nav-cell-label">DISTANCE (m)</span>
+        <span class="nav-cell-val" id="nav-dist">—</span>
+      </div>
+      <div class="nav-cell">
+        <span class="nav-cell-label">BEARING (°)</span>
+        <span class="nav-cell-val" id="nav-bearing">—</span>
+      </div>
+      <div class="nav-cell">
+        <span class="nav-cell-label">MODE</span>
+        <span class="nav-cell-val" id="nav-mode-disp">—</span>
+      </div>
+      <div class="nav-cell">
+        <span class="nav-cell-label">FILTER</span>
+        <span class="nav-cell-val" id="nav-filter-disp">—</span>
+      </div>
+      <div class="nav-cell">
+        <span class="nav-cell-label">TOLERANCE (m)</span>
+        <span class="nav-cell-val" id="nav-tol">—</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Speed slider bar -->
   <div id="speed-bar">
     <span id="speed-label">SPEED</span>
@@ -356,6 +482,11 @@
   <div id="joystick-zone">
     <span id="joystick-hint">TOUCH TO CONTROL</span>
     <div id="warn-banner">⚠ CONNECTION LOST — ROBOT STOPPED</div>
+    <!-- AUTO MODE overlay -->
+    <div id="auto-overlay">
+      <div id="auto-overlay-text">AUTO MODE</div>
+      <div id="auto-overlay-sub">JOYSTICK DISABLED</div>
+    </div>
   </div>
 </div>
 
@@ -388,6 +519,12 @@ let lastHeartbeatSent = 0;
 
 // ── State machine (client-side tracking) ────────────────────
 let controlStateActive = false;  // false = AUTO_READY, true = AUTO_ACTIVE
+
+// ── Navigation state ────────────────────────────────────────
+let navActive   = false;      // true when server reports state=navigating
+let navWpCount  = 0;          // 已上传航点数
+let navMode     = "p2p";      // p2p | pure_pursuit
+let filterMode  = "moving_avg"; // moving_avg | kalman
 
 function toggleControlState() {
   sendMsg({ type: "toggle_state" });
@@ -431,11 +568,15 @@ function connect() {
   ws.onmessage = (evt) => {
     try {
       const msg = JSON.parse(evt.data);
-      if (msg.type === "imu")           handleIMU(msg);
-      if (msg.type === "status")        handleStatus(msg);
-      if (msg.type === "rtk")           handleRTK(msg);
-      if (msg.type === "record_status") handleRecordStatus(msg);
-      if (msg.type === "state_status")  handleStateStatus(msg);
+      if (msg.type === "imu")            handleIMU(msg);
+      if (msg.type === "status")         handleStatus(msg);
+      if (msg.type === "rtk")            handleRTK(msg);
+      if (msg.type === "record_status")  handleRecordStatus(msg);
+      if (msg.type === "state_status")   handleStateStatus(msg);
+      if (msg.type === "waypoints_loaded") handleWaypointsLoaded(msg);
+      if (msg.type === "nav_status")     handleNavStatus(msg);
+      if (msg.type === "nav_complete")   handleNavComplete(msg);
+      if (msg.type === "nav_warning")    handleNavWarning(msg);
     } catch(e) {}
   };
 }
@@ -455,7 +596,7 @@ function scheduleHeartbeat() {
 
 function scheduleJoySend() {
   joySendTimer = setInterval(() => {
-    if (joystickActive) {
+    if (joystickActive && !navActive) {
       sendMsg({ type: "joystick", linear: currentLinear, angular: currentAngular, force: currentForce });
     }
   }, JOYSTICK_SEND_INTERVAL_MS);
@@ -579,6 +720,95 @@ function handleRecordStatus(msg) {
   }
 }
 
+// ── Navigation handlers ─────────────────────────────────────
+function handleWaypointsLoaded(msg) {
+  navWpCount = msg.count || 0;
+  document.getElementById('nav-wp-count').textContent = navWpCount + ' WP';
+  if (msg.error) {
+    document.getElementById('nav-wp-count').style.color = 'var(--red)';
+  } else {
+    document.getElementById('nav-wp-count').style.color = navWpCount > 0 ? 'var(--green)' : 'var(--dim)';
+  }
+}
+
+function handleNavStatus(msg) {
+  const state = msg.state || 'idle';
+  navActive = (state === 'navigating');
+
+  // 导航状态面板显示/隐藏
+  const statusPanel = document.getElementById('nav-status-panel');
+  if (navActive || state === 'finished') {
+    statusPanel.classList.add('visible');
+  } else {
+    statusPanel.classList.remove('visible');
+  }
+
+  // AUTO 按钮状态
+  const autoBtn = document.getElementById('nav-auto-btn');
+  if (navActive) {
+    autoBtn.className = 'nav-active';
+    autoBtn.textContent = '■ STOP';
+  } else {
+    autoBtn.className = 'nav-idle';
+    autoBtn.textContent = '▶ AUTO';
+  }
+
+  // AUTO MODE 遮罩
+  const overlay = document.getElementById('auto-overlay');
+  if (navActive) {
+    overlay.classList.add('visible');
+  } else {
+    overlay.classList.remove('visible');
+  }
+
+  // 状态面板数值更新
+  const prog = msg.progress || [0, 0];
+  document.getElementById('nav-progress').textContent  = prog[0] + ' / ' + prog[1];
+  document.getElementById('nav-dist').textContent     = msg.distance_m !== null && msg.distance_m !== undefined ? msg.distance_m.toFixed(1) : '--';
+  document.getElementById('nav-bearing').textContent  = msg.target_bearing !== null && msg.target_bearing !== undefined ? msg.target_bearing.toFixed(0) + '°' : '--';
+  document.getElementById('nav-mode-disp').textContent   = (msg.nav_mode || '--').toUpperCase();
+  document.getElementById('nav-filter-disp').textContent = (msg.filter_mode || '--').toUpperCase();
+  document.getElementById('nav-tol').textContent     = msg.tolerance_m !== null && msg.tolerance_m !== undefined ? msg.tolerance_m.toFixed(1) : '--';
+}
+
+function handleNavComplete(msg) {
+  navActive = false;
+  document.getElementById('auto-overlay').classList.remove('visible');
+  document.getElementById('nav-auto-btn').className = 'nav-idle';
+  document.getElementById('nav-auto-btn').textContent = '▶ AUTO';
+  const total = msg.total_wp || 0;
+  // 在状态面板显示完成信息
+  document.getElementById('nav-progress').textContent = '✓ DONE (' + total + ')';
+  document.getElementById('nav-status-panel').classList.add('visible');
+}
+
+function handleNavWarning(msg) {
+  const warn = document.getElementById('warn-banner');
+  const txt = msg.msg || 'Navigation warning';
+  warn.textContent = '⚠ ' + txt.toUpperCase();
+  warn.classList.add('visible');
+  setTimeout(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    warn.classList.remove('visible');
+    warn.textContent = '⚠ CONNECTION LOST — ROBOT STOPPED';
+  }, 5000);
+}
+
+// ── Nav mode & filter toggle helpers ───────────────────────
+function setNavMode(mode) {
+  navMode = mode;
+  document.getElementById('btn-p2p').classList.toggle('active',     mode === 'p2p');
+  document.getElementById('btn-pursuit').classList.toggle('active', mode === 'pure_pursuit');
+  sendMsg({ type: 'nav_mode', mode: mode });
+}
+
+function setFilterMode(mode) {
+  filterMode = mode;
+  document.getElementById('btn-mavg').classList.toggle('active',   mode === 'moving_avg');
+  document.getElementById('btn-kalman').classList.toggle('active', mode === 'kalman');
+  sendMsg({ type: 'filter_mode', mode: mode });
+}
+
 // ── Direction label ─────────────────────────────────────────
 function dirLabel(linear, angular) {
   const fwd  = linear  >  0.05;
@@ -676,6 +906,43 @@ window.addEventListener('load', () => {
     speedRatio = parseInt(e.target.value) / 100;
     document.getElementById('speed-value').textContent = e.target.value + '%';
   });
+
+  // ── Navigation bindings ────────────────────────────────
+  // CSV upload
+  const csvInput = document.getElementById('csv-file-input');
+  const uploadBtn = document.getElementById('nav-upload-btn');
+  uploadBtn.addEventListener('click', () => csvInput.click());
+  uploadBtn.addEventListener('touchend', (e) => { e.preventDefault(); csvInput.click(); });
+  csvInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const csv = ev.target.result;
+      sendMsg({ type: 'upload_waypoints', csv: csv });
+    };
+    reader.readAsText(file);
+    // 重置 input 以便重复选同一文件
+    csvInput.value = '';
+  });
+
+  // Nav mode buttons
+  document.getElementById('btn-p2p').addEventListener('click',     () => setNavMode('p2p'));
+  document.getElementById('btn-pursuit').addEventListener('click', () => setNavMode('pure_pursuit'));
+  document.getElementById('btn-mavg').addEventListener('click',   () => setFilterMode('moving_avg'));
+  document.getElementById('btn-kalman').addEventListener('click',  () => setFilterMode('kalman'));
+
+  // AUTO start/stop button
+  const autoBtn = document.getElementById('nav-auto-btn');
+  function toggleNav() {
+    if (navActive) {
+      sendMsg({ type: 'nav_stop' });
+    } else {
+      sendMsg({ type: 'nav_start' });
+    }
+  }
+  autoBtn.addEventListener('click', toggleNav);
+  autoBtn.addEventListener('touchend', (e) => { e.preventDefault(); toggleNav(); });
 
   // Start WebSocket
   connect();

@@ -29,7 +29,7 @@ from pathlib import Path
 from pynput import keyboard
 
 from config import FEATHER_PORT, KEY_REPEAT_INTERVAL
-from serial_writer import SerialWriter
+from core.serial_writer import SerialWriter
 
 _py_name = Path(__file__).stem
 Path("log").mkdir(exist_ok=True)

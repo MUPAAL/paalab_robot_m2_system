@@ -47,7 +47,7 @@ MENU = {
     "2": {"label": "Local control + camera",             "cmds": [[sys.executable, "local_controller.py"], CAMERA_MULTI_CMD]},
     "3": {"label": "Remote TCP control",                 "cmds": [[sys.executable, "robot_receiver.py"]]},
     "4": {"label": "Remote TCP control + camera stream", "cmds": [[sys.executable, "robot_receiver.py"],
-                                                                   [sys.executable, "camera_streamer.py"]]},
+                                                                   [sys.executable, "-m", "camera.camera_streamer"]]},
     "5": {"label": "Local camera test",                  "cmds": None},
     "6": {"label": "Web joystick control (HTTP :8888, WS :8889)", "cmds": [[sys.executable, "web_controller.py"]]},
 }
