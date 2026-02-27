@@ -32,90 +32,27 @@
     -webkit-user-select: none;
   }
 
-  /* ── Layout ── */
+  /* ── App container: full-screen relative positioning ── */
   #app {
-    display: flex; flex-direction: column;
-    height: 100dvh; gap: 0;
-  }
-
-  /* Title bar */
-  #titlebar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 6px 12px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  #titlebar .title { color: var(--accent); font-size: 14px; font-weight: bold; letter-spacing: 2px; }
-  #status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); margin-right: 6px; }
-  #status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
-  #status-dot.offline { background: var(--red); }
-  #status-text { font-size: 11px; color: var(--dim); }
-
-  /* HUD panels row */
-  #hud-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    flex-shrink: 0;
-    background: var(--border);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .hud-panel {
-    background: var(--panel);
-    padding: 8px 10px;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .hud-panel-title {
-    color: var(--accent); font-size: 10px; letter-spacing: 1.5px;
-    text-transform: uppercase; margin-bottom: 2px;
-    border-bottom: 1px solid var(--border); padding-bottom: 3px;
-  }
-  .hud-value { display: flex; justify-content: space-between; align-items: center; }
-  .hud-label { color: var(--dim); font-size: 11px; }
-  .hud-num { color: var(--text); font-size: 12px; min-width: 80px; text-align: right; }
-  .hud-num.accent { color: var(--accent); }
-
-  /* Compass panel */
-  #compass-panel {
-    background: var(--panel);
-    padding: 8px 10px;
-    display: flex; flex-direction: column; gap: 4px;
-    align-items: center;
-  }
-  #compass-panel .hud-panel-title { align-self: stretch; }
-  #compass-svg-wrap {
-    display: flex; flex-direction: column; align-items: center; gap: 2px;
-    flex: 1;
-  }
-  #compass-svg { width: 80px; height: 80px; }
-  #compass-bearing { color: var(--accent); font-size: 18px; font-weight: bold; }
-  #compass-cardinal { color: var(--text); font-size: 12px; }
-  #compass-accuracy { font-size: 10px; letter-spacing: 0.5px; }
-  #compass-accuracy.acc-0 { color: var(--red); }
-  #compass-accuracy.acc-1 { color: var(--warn); }
-  #compass-accuracy.acc-2 { color: var(--green); }
-  #compass-accuracy.acc-3 { color: var(--green); text-shadow: 0 0 4px var(--green); }
-
-  /* Joystick data panel */
-  #joy-data-panel {
-    background: var(--panel);
-    padding: 8px 10px;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-
-  /* Bottom: joystick zone */
-  #joystick-zone {
-    flex: 1;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--bg);
     position: relative;
-    min-height: 160px;
+    width: 100vw;
+    height: 100dvh;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* ── Joystick zone: full-screen base layer (z-index: 0) ── */
+  #joystick-zone {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: var(--bg);
   }
 
   #joystick-hint {
     position: absolute;
+    top: 45%; left: 50%;
+    transform: translate(-50%, -50%);
     color: var(--dim); font-size: 11px;
     pointer-events: none;
     letter-spacing: 1px;
@@ -125,167 +62,6 @@
   .nipple .front { background: var(--accent) !important; }
   .nipple .back  { background: rgba(0,212,255,0.15) !important; border: 2px solid var(--accent-dim) !important; }
 
-  /* Warning banner */
-  #warn-banner {
-    display: none; position: absolute; top: 0; left: 0; right: 0;
-    background: var(--red); color: #fff;
-    text-align: center; padding: 4px; font-size: 12px; z-index: 100;
-  }
-  #warn-banner.visible { display: block; }
-
-  /* Separator bar */
-  .sep { width: 100%; height: 1px; background: var(--border); flex-shrink: 0; }
-
-  /* State toggle button */
-  #state-btn {
-    width: 100%;
-    padding: 10px 12px;
-    border: none; outline: none;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 13px; font-weight: bold; letter-spacing: 2px;
-    cursor: pointer; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center; gap: 10px;
-    transition: background 0.2s;
-  }
-  #state-btn.state-ready  { background: #1a0a0a; color: var(--red);   border-bottom: 2px solid var(--red); }
-  #state-btn.state-active { background: #0a1a0e; color: var(--green); border-bottom: 2px solid var(--green); box-shadow: 0 0 8px rgba(0,255,136,0.2); }
-  #state-btn:disabled     { opacity: 0.4; cursor: not-allowed; }
-
-  /* RTK panel */
-  #rtk-panel {
-    background: var(--panel);
-    padding: 8px 10px;
-    flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  #rtk-header {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 6px;
-    border-bottom: 1px solid var(--border); padding-bottom: 4px;
-  }
-  #rtk-title { color: var(--accent); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
-  #rtk-fix-badge {
-    font-size: 10px; font-weight: bold; letter-spacing: 1px;
-    padding: 1px 6px; border-radius: 3px;
-    background: #2a0a0a; color: var(--red); border: 1px solid var(--red);
-  }
-  #rtk-fix-badge.fix-gps  { background: #2a1a00; color: var(--warn); border-color: var(--warn); }
-  #rtk-fix-badge.fix-rtk  { background: #0a1a0e; color: var(--green); border-color: var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.3); }
-  #rtk-live-dot {
-    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    background: var(--dim); margin-left: auto;
-  }
-  #rtk-live-dot.live { background: var(--green); box-shadow: 0 0 5px var(--green); }
-  #rtk-grid {
-    display: grid; grid-template-columns: 1fr 1fr 1fr;
-    gap: 3px 8px;
-  }
-  .rtk-cell { display: flex; flex-direction: column; }
-  .rtk-cell-label { color: var(--dim); font-size: 9px; letter-spacing: 0.5px; }
-  .rtk-cell-val   { color: var(--text); font-size: 11px; }
-  .rtk-cell-val.accent { color: var(--accent); }
-
-  /* Record button */
-  #rec-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  #rec-btn {
-    padding: 5px 14px;
-    border: none; outline: none;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 12px; font-weight: bold; letter-spacing: 1.5px;
-    cursor: pointer; border-radius: 3px;
-    transition: background 0.2s;
-  }
-  #rec-btn.rec-idle    { background: #1e2d3d; color: var(--dim);   border: 1px solid var(--border); }
-  #rec-btn.rec-active  { background: #2a0808; color: var(--red);   border: 1px solid var(--red); box-shadow: 0 0 6px rgba(255,64,96,0.3); }
-  #rec-filename { color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-
-  /* Speed slider */
-  #speed-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 12px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    font-size: 12px; color: var(--dim);
-    font-family: 'Courier New', Courier, monospace;
-  }
-  #speed-label { letter-spacing: 1px; white-space: nowrap; }
-  #speed-slider {
-    flex: 1;
-    accent-color: var(--accent);
-  }
-  #speed-value {
-    min-width: 40px; text-align: right;
-    color: var(--accent); font-weight: bold;
-  }
-
-  /* ── Nav panel ──────────────────────────────────────── */
-  #nav-panel {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 10px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    flex-wrap: wrap;
-  }
-  #nav-title { color: var(--accent); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; white-space: nowrap; }
-  #nav-upload-btn {
-    padding: 4px 10px;
-    border: 1px solid var(--border); border-radius: 3px;
-    background: #1e2d3d; color: var(--dim);
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 11px; cursor: pointer;
-    white-space: nowrap;
-  }
-  #nav-upload-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #nav-wp-count { color: var(--dim); font-size: 11px; white-space: nowrap; min-width: 50px; }
-
-  .nav-mode-btn {
-    padding: 4px 8px;
-    border: 1px solid var(--border); border-radius: 3px;
-    background: #1e2d3d; color: var(--dim);
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 10px; cursor: pointer; letter-spacing: 0.5px;
-    white-space: nowrap;
-  }
-  .nav-mode-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.08); }
-
-  #nav-auto-btn {
-    padding: 5px 14px;
-    border: none; outline: none;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 12px; font-weight: bold; letter-spacing: 1.5px;
-    cursor: pointer; border-radius: 3px;
-    margin-left: auto;
-    white-space: nowrap;
-  }
-  #nav-auto-btn.nav-idle    { background: #1e2d3d; color: var(--dim);   border: 1px solid var(--border); }
-  #nav-auto-btn.nav-active  { background: #0a1a0e; color: var(--green); border: 1px solid var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.3); }
-
-  /* Nav status panel */
-  #nav-status-panel {
-    display: none;
-    background: #0d1a10;
-    border-bottom: 1px solid #1e3d28;
-    padding: 6px 10px;
-    flex-shrink: 0;
-  }
-  #nav-status-panel.visible { display: block; }
-  #nav-status-grid {
-    display: grid; grid-template-columns: 1fr 1fr 1fr;
-    gap: 3px 8px;
-  }
-  .nav-cell { display: flex; flex-direction: column; }
-  .nav-cell-label { color: #5a8070; font-size: 9px; letter-spacing: 0.5px; }
-  .nav-cell-val   { color: var(--text); font-size: 11px; }
-  .nav-cell-val.green { color: var(--green); }
-
   /* AUTO MODE joystick overlay */
   #auto-overlay {
     display: none;
@@ -293,7 +69,7 @@
     background: rgba(0,0,0,0.7);
     align-items: center; justify-content: center;
     flex-direction: column; gap: 6px;
-    z-index: 10;
+    z-index: 5;
     pointer-events: all;
     touch-action: none;
   }
@@ -305,108 +81,313 @@
   }
   #auto-overlay-sub { color: var(--dim); font-size: 11px; letter-spacing: 1px; }
 
-  /* Hidden file input */
-  #csv-file-input { display: none; }
+  /* ── Warning banner (below top-bar, z-index: 20) ── */
+  #warn-banner {
+    display: none;
+    position: absolute;
+    top: 44px; left: 0; right: 0;
+    background: var(--red); color: #fff;
+    text-align: center; padding: 4px; font-size: 12px;
+    z-index: 20;
+    pointer-events: none;
+  }
+  #warn-banner.visible { display: block; }
+
+  /* ── Top bar ── */
+  #top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 44px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    background: rgba(17, 24, 32, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    pointer-events: auto;
+  }
+
+  .title { color: var(--accent); font-size: 13px; font-weight: bold; letter-spacing: 2px; white-space: nowrap; }
+  #status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+  #status-dot.online  { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  #status-dot.offline { background: var(--red); }
+  #status-text { font-size: 10px; color: var(--dim); white-space: nowrap; }
+
+  /* State toggle button — compact for top-bar */
+  #state-btn {
+    flex: 1;
+    padding: 5px 8px;
+    border: none; outline: none;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px; font-weight: bold; letter-spacing: 1.5px;
+    cursor: pointer; border-radius: 3px;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    transition: background 0.2s;
+    white-space: nowrap; min-width: 0;
+  }
+  #state-btn.state-ready  { background: rgba(255,64,96,0.15);  color: var(--red);   border: 1px solid var(--red); }
+  #state-btn.state-active { background: rgba(0,255,136,0.12); color: var(--green); border: 1px solid var(--green); box-shadow: 0 0 6px rgba(0,255,136,0.2); }
+  #state-btn:disabled     { opacity: 0.4; cursor: not-allowed; }
+
+  /* Record button — compact */
+  #rec-btn {
+    padding: 5px 10px;
+    border: none; outline: none;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px; font-weight: bold; letter-spacing: 1px;
+    cursor: pointer; border-radius: 3px;
+    transition: background 0.2s; white-space: nowrap; flex-shrink: 0;
+  }
+  #rec-btn.rec-idle   { background: #1e2d3d; color: var(--dim);  border: 1px solid var(--border); }
+  #rec-btn.rec-active { background: #2a0808; color: var(--red);  border: 1px solid var(--red); box-shadow: 0 0 5px rgba(255,64,96,0.3); }
+  #rec-filename { color: var(--dim); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80px; }
+
+  /* ── Left HUD panel: IMU + Compass ── */
+  #hud-left {
+    position: absolute;
+    top: 48px; left: 0;
+    z-index: 10;
+    background: rgba(17, 24, 32, 0.82);
+    backdrop-filter: blur(6px);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    border-bottom-right-radius: 6px;
+    padding: 6px 8px;
+    pointer-events: none;
+    min-width: 118px;
+  }
+
+  /* ── Right HUD panel: RTK GPS ── */
+  #hud-right {
+    position: absolute;
+    top: 48px; right: 0;
+    z-index: 10;
+    background: rgba(17, 24, 32, 0.82);
+    backdrop-filter: blur(6px);
+    border-left: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    border-bottom-left-radius: 6px;
+    padding: 6px 8px;
+    pointer-events: none;
+    min-width: 108px;
+  }
+
+  /* Shared HUD typography */
+  .hud-panel-title {
+    color: var(--accent); font-size: 9px; letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border); padding-bottom: 2px; margin-bottom: 3px;
+  }
+  .hud-value { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+  .hud-label { color: var(--dim); font-size: 10px; }
+  .hud-num   { color: var(--text); font-size: 10px; text-align: right; }
+  .hud-num.accent { color: var(--accent); }
+
+  /* Compass */
+  #compass-svg-wrap { display: flex; flex-direction: column; align-items: center; gap: 1px; margin-top: 3px; }
+  #compass-svg { width: 64px; height: 64px; }
+  #compass-bearing { color: var(--accent); font-size: 14px; font-weight: bold; }
+  #compass-cardinal { color: var(--text); font-size: 10px; }
+  #compass-accuracy { font-size: 9px; letter-spacing: 0.5px; }
+  #compass-accuracy.acc-0 { color: var(--red); }
+  #compass-accuracy.acc-1 { color: var(--warn); }
+  #compass-accuracy.acc-2 { color: var(--green); }
+  #compass-accuracy.acc-3 { color: var(--green); text-shadow: 0 0 4px var(--green); }
+
+  /* RTK in hud-right */
+  #rtk-header {
+    display: flex; align-items: center; gap: 5px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid var(--border); padding-bottom: 3px;
+  }
+  #rtk-title { color: var(--accent); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; }
+  #rtk-fix-badge {
+    font-size: 9px; font-weight: bold; letter-spacing: 0.5px;
+    padding: 1px 4px; border-radius: 3px;
+    background: #2a0a0a; color: var(--red); border: 1px solid var(--red);
+  }
+  #rtk-fix-badge.fix-gps { background: #2a1a00; color: var(--warn); border-color: var(--warn); }
+  #rtk-fix-badge.fix-rtk { background: #0a1a0e; color: var(--green); border-color: var(--green); box-shadow: 0 0 5px rgba(0,255,136,0.3); }
+  #rtk-live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); margin-left: auto; }
+  #rtk-live-dot.live { background: var(--green); box-shadow: 0 0 4px var(--green); }
+  .rtk-cell { display: flex; flex-direction: column; margin-bottom: 2px; }
+  .rtk-cell-label { color: var(--dim); font-size: 8px; letter-spacing: 0.5px; }
+  .rtk-cell-val   { color: var(--text); font-size: 10px; }
+  .rtk-cell-val.accent { color: var(--accent); }
+  #rtk-sats-row { display: flex; gap: 6px; }
+
+  /* ── Nav status panel (center-top floating, nav only) ── */
+  #nav-status-panel {
+    display: none;
+    position: absolute;
+    top: 48px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(13, 26, 16, 0.92);
+    border: 1px solid #1e3d28;
+    border-top: none;
+    backdrop-filter: blur(6px);
+    padding: 5px 10px;
+    pointer-events: none;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+    min-width: 190px;
+  }
+  #nav-status-panel.visible { display: block; }
+  #nav-status-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px 6px; }
+  .nav-cell { display: flex; flex-direction: column; }
+  .nav-cell-label { color: #5a8070; font-size: 8px; letter-spacing: 0.5px; }
+  .nav-cell-val   { color: var(--text); font-size: 10px; }
+  .nav-cell-val.green { color: var(--green); }
+
+  /* ── Bottom bar: speed + nav controls ── */
+  #bottom-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    z-index: 10;
+    background: rgba(17, 24, 32, 0.92);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--border);
+    padding: 5px 10px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    pointer-events: auto;
+    font-family: 'Courier New', Courier, monospace;
+  }
+  #speed-label { letter-spacing: 1px; white-space: nowrap; color: var(--dim); font-size: 11px; flex-shrink: 0; }
+  #speed-slider { flex: 1; min-width: 60px; accent-color: var(--accent); }
+  #speed-value { min-width: 32px; text-align: right; color: var(--accent); font-weight: bold; font-size: 11px; flex-shrink: 0; }
+
+  #nav-upload-btn {
+    padding: 3px 7px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: #1e2d3d; color: var(--dim);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  }
+  #nav-upload-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #nav-wp-count { color: var(--dim); font-size: 10px; white-space: nowrap; flex-shrink: 0; }
+
+  .nav-mode-btn {
+    padding: 3px 5px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: #1e2d3d; color: var(--dim);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 9px; cursor: pointer; letter-spacing: 0.3px; white-space: nowrap; flex-shrink: 0;
+  }
+  .nav-mode-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.08); }
+
+  #nav-auto-btn {
+    padding: 4px 10px;
+    border: none; outline: none;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px; font-weight: bold; letter-spacing: 1px;
+    cursor: pointer; border-radius: 3px;
+    margin-left: auto; white-space: nowrap; flex-shrink: 0;
+  }
+  #nav-auto-btn.nav-idle   { background: #1e2d3d; color: var(--dim);   border: 1px solid var(--border); }
+  #nav-auto-btn.nav-active { background: #0a1a0e; color: var(--green); border: 1px solid var(--green); box-shadow: 0 0 5px rgba(0,255,136,0.3); }
+
+  /* Hidden elements */
+  #csv-file-input  { display: none; }
+  #joy-data-hidden { display: none; }
 </style>
 </head>
 <body>
 
 <div id="app">
-  <!-- Title bar -->
-  <div id="titlebar">
-    <span class="title">FARM ROBOT</span>
-    <span>
-      <span id="status-dot"></span>
-      <span id="status-text">OFFLINE</span>
-    </span>
-  </div>
 
-  <!-- State toggle button -->
-  <button id="state-btn" class="state-ready" disabled>
-    <span id="state-indicator">●</span>
-    <span id="state-label">AUTO_READY — TAP TO ACTIVATE</span>
-  </button>
-
-  <!-- HUD row (2×2 grid) -->
-  <div id="hud-row">
-    <!-- Accelerometer -->
-    <div class="hud-panel">
-      <div class="hud-panel-title">ACCELEROMETER</div>
-      <div class="hud-value"><span class="hud-label">X</span><span class="hud-num" id="acc-x">-- m/s²</span></div>
-      <div class="hud-value"><span class="hud-label">Y</span><span class="hud-num" id="acc-y">-- m/s²</span></div>
-      <div class="hud-value"><span class="hud-label">Z</span><span class="hud-num" id="acc-z">-- m/s²</span></div>
-      <div style="margin-top:4px;" class="hud-panel-title">GYROSCOPE</div>
-      <div class="hud-value"><span class="hud-label">X</span><span class="hud-num" id="gyro-x">-- rad/s</span></div>
-      <div class="hud-value"><span class="hud-label">Y</span><span class="hud-num" id="gyro-y">-- rad/s</span></div>
-      <div class="hud-value"><span class="hud-label">Z</span><span class="hud-num" id="gyro-z">-- rad/s</span></div>
-    </div>
-
-    <!-- Compass + Joystick data -->
-    <div style="display:flex;flex-direction:column;gap:1px;background:var(--border);">
-      <div id="compass-panel" class="hud-panel" style="flex:1;">
-        <div class="hud-panel-title" style="align-self:stretch;">COMPASS</div>
-        <div id="compass-svg-wrap">
-          <svg id="compass-svg" viewBox="0 0 100 100">
-            <!-- Outer ring -->
-            <circle cx="50" cy="50" r="46" fill="none" stroke="#1e2d3d" stroke-width="2"/>
-            <!-- Cardinal ticks -->
-            <g stroke="#5a7080" stroke-width="1.5">
-              <line x1="50" y1="6" x2="50" y2="14"/>
-              <line x1="94" y1="50" x2="86" y2="50"/>
-              <line x1="50" y1="94" x2="50" y2="86"/>
-              <line x1="6" y1="50" x2="14" y2="50"/>
-            </g>
-            <!-- Cardinal labels -->
-            <text x="50" y="22" text-anchor="middle" fill="#00d4ff" font-size="10" font-family="Courier New">N</text>
-            <text x="50" y="84" text-anchor="middle" fill="#5a7080" font-size="9" font-family="Courier New">S</text>
-            <text x="82" y="54" text-anchor="middle" fill="#5a7080" font-size="9" font-family="Courier New">E</text>
-            <text x="18" y="54" text-anchor="middle" fill="#5a7080" font-size="9" font-family="Courier New">W</text>
-            <!-- Needle group (rotated by JS) -->
-            <g id="compass-needle" transform="rotate(0,50,50)">
-              <!-- North (red) -->
-              <polygon points="50,16 46,50 54,50" fill="#ff4060"/>
-              <!-- South (dim) -->
-              <polygon points="50,84 46,50 54,50" fill="#1e2d3d"/>
-            </g>
-            <!-- Center dot -->
-            <circle cx="50" cy="50" r="3" fill="#00d4ff"/>
-          </svg>
-          <div id="compass-bearing">---°</div>
-          <div id="compass-cardinal">--</div>
-          <div id="compass-accuracy" class="acc-0">● UNCAL</div>
-        </div>
-      </div>
-
-      <div id="joy-data-panel" class="hud-panel">
-        <div class="hud-panel-title">JOYSTICK</div>
-        <div class="hud-value"><span class="hud-label">Force</span><span class="hud-num accent" id="joy-force">0.00</span></div>
-        <div class="hud-value"><span class="hud-label">Linear</span><span class="hud-num" id="joy-linear">+0.00 m/s</span></div>
-        <div class="hud-value"><span class="hud-label">Angular</span><span class="hud-num" id="joy-angular">+0.00 r/s</span></div>
-        <div class="hud-value"><span class="hud-label">Dir</span><span class="hud-num accent" id="joy-dir">--</span></div>
-      </div>
+  <!-- ── 全屏摇杆（底层 z-index:0）── -->
+  <div id="joystick-zone">
+    <span id="joystick-hint">TOUCH TO CONTROL</span>
+    <!-- AUTO MODE overlay -->
+    <div id="auto-overlay">
+      <div id="auto-overlay-text">AUTO MODE</div>
+      <div id="auto-overlay-sub">JOYSTICK DISABLED</div>
     </div>
   </div>
 
-  <!-- RTK GPS panel -->
-  <div id="rtk-panel">
+  <!-- 警告横幅（顶部栏下方，z-index:20）-->
+  <div id="warn-banner">⚠ CONNECTION LOST — ROBOT STOPPED</div>
+
+  <!-- ── 顶部栏 ── -->
+  <div id="top-bar">
+    <span class="title">FARMBOT</span>
+    <span id="status-dot"></span>
+    <span id="status-text">OFFLINE</span>
+    <button id="state-btn" class="state-ready" disabled>
+      <span id="state-indicator">●</span>
+      <span id="state-label">ACTIVATE</span>
+    </button>
+    <button id="rec-btn" class="rec-idle">● REC</button>
+    <span id="rec-filename">—</span>
+  </div>
+
+  <!-- ── 左上 HUD：IMU + 罗盘 ── -->
+  <div id="hud-left">
+    <div class="hud-panel-title">ACCEL</div>
+    <div class="hud-value"><span class="hud-label">X</span><span class="hud-num" id="acc-x">--</span></div>
+    <div class="hud-value"><span class="hud-label">Y</span><span class="hud-num" id="acc-y">--</span></div>
+    <div class="hud-value"><span class="hud-label">Z</span><span class="hud-num" id="acc-z">--</span></div>
+    <div class="hud-panel-title" style="margin-top:5px;">GYRO</div>
+    <div class="hud-value"><span class="hud-label">X</span><span class="hud-num" id="gyro-x">--</span></div>
+    <div class="hud-value"><span class="hud-label">Y</span><span class="hud-num" id="gyro-y">--</span></div>
+    <div class="hud-value"><span class="hud-label">Z</span><span class="hud-num" id="gyro-z">--</span></div>
+    <div class="hud-panel-title" style="margin-top:5px;">COMPASS</div>
+    <div id="compass-svg-wrap">
+      <svg id="compass-svg" viewBox="0 0 100 100">
+        <!-- Outer ring -->
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#1e2d3d" stroke-width="2"/>
+        <!-- Cardinal ticks -->
+        <g stroke="#5a7080" stroke-width="1.5">
+          <line x1="50" y1="6"  x2="50" y2="14"/>
+          <line x1="94" y1="50" x2="86" y2="50"/>
+          <line x1="50" y1="94" x2="50" y2="86"/>
+          <line x1="6"  y1="50" x2="14" y2="50"/>
+        </g>
+        <!-- Cardinal labels -->
+        <text x="50" y="22" text-anchor="middle" fill="#00d4ff" font-size="10" font-family="Courier New">N</text>
+        <text x="50" y="84" text-anchor="middle" fill="#5a7080" font-size="9"  font-family="Courier New">S</text>
+        <text x="82" y="54" text-anchor="middle" fill="#5a7080" font-size="9"  font-family="Courier New">E</text>
+        <text x="18" y="54" text-anchor="middle" fill="#5a7080" font-size="9"  font-family="Courier New">W</text>
+        <!-- Needle group (rotated by JS) -->
+        <g id="compass-needle" transform="rotate(0,50,50)">
+          <polygon points="50,16 46,50 54,50" fill="#ff4060"/>
+          <polygon points="50,84 46,50 54,50" fill="#1e2d3d"/>
+        </g>
+        <!-- Center dot -->
+        <circle cx="50" cy="50" r="3" fill="#00d4ff"/>
+      </svg>
+      <div id="compass-bearing">---°</div>
+      <div id="compass-cardinal">--</div>
+      <div id="compass-accuracy" class="acc-0">● UNCAL</div>
+    </div>
+  </div>
+
+  <!-- ── 右上 HUD：RTK GPS ── -->
+  <div id="hud-right">
     <div id="rtk-header">
       <span id="rtk-title">RTK GPS</span>
       <span id="rtk-fix-badge">NO FIX</span>
       <span id="rtk-live-dot" title="RTK OFFLINE"></span>
     </div>
-    <div id="rtk-grid">
-      <div class="rtk-cell">
-        <span class="rtk-cell-label">LAT</span>
-        <span class="rtk-cell-val accent" id="rtk-lat">--</span>
-      </div>
-      <div class="rtk-cell">
-        <span class="rtk-cell-label">LON</span>
-        <span class="rtk-cell-val accent" id="rtk-lon">--</span>
-      </div>
-      <div class="rtk-cell">
-        <span class="rtk-cell-label">ALT (m)</span>
-        <span class="rtk-cell-val" id="rtk-alt">--</span>
-      </div>
+    <div class="rtk-cell">
+      <span class="rtk-cell-label">LAT</span>
+      <span class="rtk-cell-val accent" id="rtk-lat">--</span>
+    </div>
+    <div class="rtk-cell">
+      <span class="rtk-cell-label">LON</span>
+      <span class="rtk-cell-val accent" id="rtk-lon">--</span>
+    </div>
+    <div class="rtk-cell">
+      <span class="rtk-cell-label">ALT (m)</span>
+      <span class="rtk-cell-val" id="rtk-alt">--</span>
+    </div>
+    <div id="rtk-sats-row">
       <div class="rtk-cell">
         <span class="rtk-cell-label">SATS</span>
         <span class="rtk-cell-val" id="rtk-sats">--</span>
@@ -416,32 +397,13 @@
         <span class="rtk-cell-val" id="rtk-hdop">--</span>
       </div>
       <div class="rtk-cell">
-        <span class="rtk-cell-label">SPD (kn)</span>
+        <span class="rtk-cell-label">SPD(kn)</span>
         <span class="rtk-cell-val" id="rtk-spd">--</span>
       </div>
     </div>
   </div>
 
-  <!-- Record bar -->
-  <div id="rec-bar">
-    <button id="rec-btn" class="rec-idle">● REC</button>
-    <span id="rec-filename">—</span>
-  </div>
-
-  <!-- Navigation control panel -->
-  <div id="nav-panel">
-    <span id="nav-title">AUTO NAV</span>
-    <input type="file" id="csv-file-input" accept=".csv,text/csv">
-    <button id="nav-upload-btn">📂 UPLOAD CSV</button>
-    <span id="nav-wp-count">0 WP</span>
-    <button class="nav-mode-btn active" id="btn-p2p" title="点对点直接导航">P2P</button>
-    <button class="nav-mode-btn" id="btn-pursuit" title="Pure Pursuit 路径跟踪">PURSUIT</button>
-    <button class="nav-mode-btn active" id="btn-mavg" title="移动均值 GPS 平滑">MOV-AVG</button>
-    <button class="nav-mode-btn" id="btn-kalman" title="卡尔曼滤波 GPS+IMU 融合">KALMAN</button>
-    <button id="nav-auto-btn" class="nav-idle">▶ AUTO</button>
-  </div>
-
-  <!-- Navigation status panel (仅导航中显示) -->
+  <!-- ── 导航状态面板（居中顶部，仅导航时显示）── -->
   <div id="nav-status-panel">
     <div id="nav-status-grid">
       <div class="nav-cell">
@@ -449,11 +411,11 @@
         <span class="nav-cell-val green" id="nav-progress">—</span>
       </div>
       <div class="nav-cell">
-        <span class="nav-cell-label">DISTANCE (m)</span>
+        <span class="nav-cell-label">DIST (m)</span>
         <span class="nav-cell-val" id="nav-dist">—</span>
       </div>
       <div class="nav-cell">
-        <span class="nav-cell-label">BEARING (°)</span>
+        <span class="nav-cell-label">BEAR (°)</span>
         <span class="nav-cell-val" id="nav-bearing">—</span>
       </div>
       <div class="nav-cell">
@@ -465,29 +427,35 @@
         <span class="nav-cell-val" id="nav-filter-disp">—</span>
       </div>
       <div class="nav-cell">
-        <span class="nav-cell-label">TOLERANCE (m)</span>
+        <span class="nav-cell-label">TOL (m)</span>
         <span class="nav-cell-val" id="nav-tol">—</span>
       </div>
     </div>
   </div>
 
-  <!-- Speed slider bar -->
-  <div id="speed-bar">
-    <span id="speed-label">SPEED</span>
+  <!-- ── 底部控制栏：速度 + 导航 ── -->
+  <div id="bottom-bar">
+    <span id="speed-label">SPD</span>
     <input type="range" id="speed-slider" min="10" max="100" step="10" value="50">
     <span id="speed-value">50%</span>
+    <input type="file" id="csv-file-input" accept=".csv,text/csv">
+    <button id="nav-upload-btn">📂 CSV</button>
+    <span id="nav-wp-count">0 WP</span>
+    <button class="nav-mode-btn active" id="btn-p2p"     title="点对点直接导航">P2P</button>
+    <button class="nav-mode-btn"        id="btn-pursuit" title="Pure Pursuit 路径跟踪">PURSUIT</button>
+    <button class="nav-mode-btn active" id="btn-mavg"    title="移动均值 GPS 平滑">M-AVG</button>
+    <button class="nav-mode-btn"        id="btn-kalman"  title="卡尔曼滤波 GPS+IMU 融合">KALMAN</button>
+    <button id="nav-auto-btn" class="nav-idle">▶ AUTO</button>
   </div>
 
-  <!-- Joystick zone -->
-  <div id="joystick-zone">
-    <span id="joystick-hint">TOUCH TO CONTROL</span>
-    <div id="warn-banner">⚠ CONNECTION LOST — ROBOT STOPPED</div>
-    <!-- AUTO MODE overlay -->
-    <div id="auto-overlay">
-      <div id="auto-overlay-text">AUTO MODE</div>
-      <div id="auto-overlay-sub">JOYSTICK DISABLED</div>
-    </div>
+  <!-- 隐藏的 joy 数据元素（供 JS updateJoyUI 使用，不在界面显示）-->
+  <div id="joy-data-hidden">
+    <span id="joy-force"></span>
+    <span id="joy-linear"></span>
+    <span id="joy-angular"></span>
+    <span id="joy-dir"></span>
   </div>
+
 </div>
 
 <script src="/nipplejs.min.js"></script>
@@ -498,9 +466,7 @@ const HEARTBEAT_INTERVAL_MS = 500;
 const JOYSTICK_SEND_INTERVAL_MS = 100;  // 10Hz throttle
 const DEADZONE = 0.15;
 
-// MAX_LINEAR_VEL / MAX_ANGULAR_VEL are injected by the server
-// as meta tags or we read them from a global set by SSE/query param.
-// Fallback: 1.0
+// MAX_LINEAR_VEL / MAX_ANGULAR_VEL injected by server as data attributes or fallback 1.0
 const MAX_LINEAR  = parseFloat(document.documentElement.dataset.maxLinear  || "1.0");
 const MAX_ANGULAR = parseFloat(document.documentElement.dataset.maxAngular || "1.0");
 
@@ -515,20 +481,19 @@ let currentAngular = 0.0;
 let currentForce   = 0.0;
 let heartbeatTimer = null;
 let joySendTimer   = null;
-let lastHeartbeatSent = 0;
 
 // ── State machine (client-side tracking) ────────────────────
 let controlStateActive = false;  // false = AUTO_READY, true = AUTO_ACTIVE
 
 // ── Navigation state ────────────────────────────────────────
-let navActive   = false;      // true when server reports state=navigating
-let navWpCount  = 0;          // 已上传航点数
-let navMode     = "p2p";      // p2p | pure_pursuit
-let filterMode  = "moving_avg"; // moving_avg | kalman
+let navActive  = false;
+let navWpCount = 0;
+let navMode    = "p2p";
+let filterMode = "moving_avg";
 
 function toggleControlState() {
   sendMsg({ type: "toggle_state" });
-  // 不再立即翻转状态，等服务端 state_status 确认，防止连续点击发多次指令
+  // Disable button until server confirms new state
   document.getElementById('state-btn').disabled = true;
 }
 
@@ -537,10 +502,10 @@ function updateStateBtn() {
   const lbl = document.getElementById('state-label');
   if (controlStateActive) {
     btn.className = 'state-active';
-    lbl.textContent = 'AUTO_ACTIVE — TAP TO DEACTIVATE';
+    lbl.textContent = 'DEACTIVATE';
   } else {
     btn.className = 'state-ready';
-    lbl.textContent = 'AUTO_READY — TAP TO ACTIVATE';
+    lbl.textContent = 'ACTIVATE';
   }
 }
 
@@ -557,41 +522,34 @@ function connect() {
   ws.onclose = () => {
     setStatus(false);
     clearTimers();
-    // Auto-reconnect after 2s
     setTimeout(connect, 2000);
   };
 
-  ws.onerror = () => {
-    ws.close();
-  };
+  ws.onerror = () => { ws.close(); };
 
   ws.onmessage = (evt) => {
     try {
       const msg = JSON.parse(evt.data);
-      if (msg.type === "imu")            handleIMU(msg);
-      if (msg.type === "status")         handleStatus(msg);
-      if (msg.type === "rtk")            handleRTK(msg);
-      if (msg.type === "record_status")  handleRecordStatus(msg);
-      if (msg.type === "state_status")   handleStateStatus(msg);
+      if (msg.type === "imu")              handleIMU(msg);
+      if (msg.type === "status")           handleStatus(msg);
+      if (msg.type === "rtk")             handleRTK(msg);
+      if (msg.type === "record_status")   handleRecordStatus(msg);
+      if (msg.type === "state_status")    handleStateStatus(msg);
       if (msg.type === "waypoints_loaded") handleWaypointsLoaded(msg);
-      if (msg.type === "nav_status")     handleNavStatus(msg);
-      if (msg.type === "nav_complete")   handleNavComplete(msg);
-      if (msg.type === "nav_warning")    handleNavWarning(msg);
+      if (msg.type === "nav_status")      handleNavStatus(msg);
+      if (msg.type === "nav_complete")    handleNavComplete(msg);
+      if (msg.type === "nav_warning")     handleNavWarning(msg);
     } catch(e) {}
   };
 }
 
 function sendMsg(obj) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(obj));
-  }
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
 // ── Timers ──────────────────────────────────────────────────
 function scheduleHeartbeat() {
-  heartbeatTimer = setInterval(() => {
-    sendMsg({ type: "heartbeat" });
-  }, HEARTBEAT_INTERVAL_MS);
+  heartbeatTimer = setInterval(() => { sendMsg({ type: "heartbeat" }); }, HEARTBEAT_INTERVAL_MS);
 }
 
 function scheduleJoySend() {
@@ -623,30 +581,28 @@ function setStatus(online) {
     text.textContent = 'OFFLINE';
     warn.classList.add('visible');
     btn.disabled = true;
-    // 断线后保持最后已知状态，重连后由服务端推送 state_status 同步
   }
 }
 
-// ── IMU HUD update ─────────────────────────────────────────
+// ── IMU HUD update ──────────────────────────────────────────
 function fmt3(v) { return (v >= 0 ? '+' : '') + v.toFixed(3); }
 function fmt2(v) { return (v >= 0 ? '+' : '') + v.toFixed(2); }
 
 function handleIMU(msg) {
   if (msg.accel) {
-    document.getElementById('acc-x').textContent = fmt3(msg.accel.x) + ' m/s²';
-    document.getElementById('acc-y').textContent = fmt3(msg.accel.y) + ' m/s²';
-    document.getElementById('acc-z').textContent = fmt3(msg.accel.z) + ' m/s²';
+    document.getElementById('acc-x').textContent = fmt3(msg.accel.x);
+    document.getElementById('acc-y').textContent = fmt3(msg.accel.y);
+    document.getElementById('acc-z').textContent = fmt3(msg.accel.z);
   }
   if (msg.gyro) {
-    document.getElementById('gyro-x').textContent = fmt3(msg.gyro.x) + ' r/s';
-    document.getElementById('gyro-y').textContent = fmt3(msg.gyro.y) + ' r/s';
-    document.getElementById('gyro-z').textContent = fmt3(msg.gyro.z) + ' r/s';
+    document.getElementById('gyro-x').textContent = fmt3(msg.gyro.x);
+    document.getElementById('gyro-y').textContent = fmt3(msg.gyro.y);
+    document.getElementById('gyro-z').textContent = fmt3(msg.gyro.z);
   }
   if (msg.compass) {
     const c = msg.compass;
-    const needle = document.getElementById('compass-needle');
-    needle.setAttribute('transform', `rotate(${c.bearing.toFixed(1)},50,50)`);
-    document.getElementById('compass-bearing').textContent = c.bearing.toFixed(1) + '°';
+    document.getElementById('compass-needle').setAttribute('transform', `rotate(${c.bearing.toFixed(1)},50,50)`);
+    document.getElementById('compass-bearing').textContent  = c.bearing.toFixed(1) + '°';
     document.getElementById('compass-cardinal').textContent = c.cardinal;
     const acc = (c.accuracy !== undefined) ? Math.min(Math.max(c.accuracy, 0), 3) : (c.calibrated ? 3 : 0);
     const accLabels = ['● UNCAL', '● LOW', '● GOOD', '● PRECISE'];
@@ -657,16 +613,16 @@ function handleIMU(msg) {
 }
 
 function handleStatus(msg) {
-  // Could show serial/imu status if needed
+  // Reserved for serial/imu status if needed
 }
 
-// ── RTK HUD update ──────────────────────────────────────
+// ── RTK HUD update ──────────────────────────────────────────
 const FIX_LABELS = {
-  0: { text: "NO FIX",   cls: "" },
-  1: { text: "GPS",      cls: "fix-gps" },
-  2: { text: "DGPS",     cls: "fix-gps" },
-  4: { text: "RTK FIX",  cls: "fix-rtk" },
-  5: { text: "RTK FLT",  cls: "fix-gps" },
+  0: { text: "NO FIX",  cls: "" },
+  1: { text: "GPS",     cls: "fix-gps" },
+  2: { text: "DGPS",    cls: "fix-gps" },
+  4: { text: "RTK FIX", cls: "fix-rtk" },
+  5: { text: "RTK FLT", cls: "fix-gps" },
 };
 
 function handleRTK(msg) {
@@ -674,20 +630,15 @@ function handleRTK(msg) {
   const badge = document.getElementById('rtk-fix-badge');
 
   if (!msg.available) {
-    dot.className = '';
-    dot.title = 'RTK OFFLINE';
-    badge.textContent = 'OFFLINE';
-    badge.className = '';
+    dot.className = ''; dot.title = 'RTK OFFLINE';
+    badge.textContent = 'OFFLINE'; badge.className = '';
     return;
   }
 
-  dot.className = 'live';
-  dot.title = 'RTK LIVE';
-
+  dot.className = 'live'; dot.title = 'RTK LIVE';
   const fq = msg.fix_quality || 0;
   const fi = FIX_LABELS[fq] || { text: `FIX(${fq})`, cls: "fix-gps" };
-  badge.textContent = fi.text;
-  badge.className = fi.cls;
+  badge.textContent = fi.text; badge.className = fi.cls;
 
   const fmtCoord = (v, d) => (v !== null && v !== undefined) ? v.toFixed(d) : '--';
   document.getElementById('rtk-lat').textContent  = fmtCoord(msg.lat, 7);
@@ -698,17 +649,17 @@ function handleRTK(msg) {
   document.getElementById('rtk-spd').textContent  = fmtCoord(msg.speed_knots, 2);
 }
 
-// ── State status update ─────────────────────────────────
+// ── State status update ──────────────────────────────────────
 function handleStateStatus(msg) {
   controlStateActive = msg.active;
   updateStateBtn();
-  document.getElementById('state-btn').disabled = false;  // 解除按钮禁用
+  document.getElementById('state-btn').disabled = false;
 }
 
-// ── Record status update ─────────────────────────────────
+// ── Record status update ─────────────────────────────────────
 function handleRecordStatus(msg) {
-  const btn      = document.getElementById('rec-btn');
-  const fnSpan   = document.getElementById('rec-filename');
+  const btn    = document.getElementById('rec-btn');
+  const fnSpan = document.getElementById('rec-filename');
   if (msg.recording) {
     btn.className = 'rec-active';
     btn.textContent = '■ STOP';
@@ -720,14 +671,15 @@ function handleRecordStatus(msg) {
   }
 }
 
-// ── Navigation handlers ─────────────────────────────────────
+// ── Navigation handlers ──────────────────────────────────────
 function handleWaypointsLoaded(msg) {
   navWpCount = msg.count || 0;
-  document.getElementById('nav-wp-count').textContent = navWpCount + ' WP';
+  const el = document.getElementById('nav-wp-count');
+  el.textContent = navWpCount + ' WP';
   if (msg.error) {
-    document.getElementById('nav-wp-count').style.color = 'var(--red)';
+    el.style.color = 'var(--red)';
   } else {
-    document.getElementById('nav-wp-count').style.color = navWpCount > 0 ? 'var(--green)' : 'var(--dim)';
+    el.style.color = navWpCount > 0 ? 'var(--green)' : 'var(--dim)';
   }
 }
 
@@ -735,7 +687,6 @@ function handleNavStatus(msg) {
   const state = msg.state || 'idle';
   navActive = (state === 'navigating');
 
-  // 导航状态面板显示/隐藏
   const statusPanel = document.getElementById('nav-status-panel');
   if (navActive || state === 'finished') {
     statusPanel.classList.add('visible');
@@ -743,49 +694,38 @@ function handleNavStatus(msg) {
     statusPanel.classList.remove('visible');
   }
 
-  // AUTO 按钮状态
   const autoBtn = document.getElementById('nav-auto-btn');
   if (navActive) {
-    autoBtn.className = 'nav-active';
-    autoBtn.textContent = '■ STOP';
+    autoBtn.className = 'nav-active'; autoBtn.textContent = '■ STOP';
   } else {
-    autoBtn.className = 'nav-idle';
-    autoBtn.textContent = '▶ AUTO';
+    autoBtn.className = 'nav-idle';   autoBtn.textContent = '▶ AUTO';
   }
 
-  // AUTO MODE 遮罩
   const overlay = document.getElementById('auto-overlay');
-  if (navActive) {
-    overlay.classList.add('visible');
-  } else {
-    overlay.classList.remove('visible');
-  }
+  if (navActive) { overlay.classList.add('visible'); }
+  else           { overlay.classList.remove('visible'); }
 
-  // 状态面板数值更新
   const prog = msg.progress || [0, 0];
   document.getElementById('nav-progress').textContent  = prog[0] + ' / ' + prog[1];
-  document.getElementById('nav-dist').textContent     = msg.distance_m !== null && msg.distance_m !== undefined ? msg.distance_m.toFixed(1) : '--';
-  document.getElementById('nav-bearing').textContent  = msg.target_bearing !== null && msg.target_bearing !== undefined ? msg.target_bearing.toFixed(0) + '°' : '--';
-  document.getElementById('nav-mode-disp').textContent   = (msg.nav_mode || '--').toUpperCase();
+  document.getElementById('nav-dist').textContent      = msg.distance_m   !== null && msg.distance_m   !== undefined ? msg.distance_m.toFixed(1)   : '--';
+  document.getElementById('nav-bearing').textContent   = msg.target_bearing !== null && msg.target_bearing !== undefined ? msg.target_bearing.toFixed(0) + '°' : '--';
+  document.getElementById('nav-mode-disp').textContent   = (msg.nav_mode    || '--').toUpperCase();
   document.getElementById('nav-filter-disp').textContent = (msg.filter_mode || '--').toUpperCase();
-  document.getElementById('nav-tol').textContent     = msg.tolerance_m !== null && msg.tolerance_m !== undefined ? msg.tolerance_m.toFixed(1) : '--';
+  document.getElementById('nav-tol').textContent       = msg.tolerance_m  !== null && msg.tolerance_m  !== undefined ? msg.tolerance_m.toFixed(1)  : '--';
 }
 
 function handleNavComplete(msg) {
   navActive = false;
   document.getElementById('auto-overlay').classList.remove('visible');
-  document.getElementById('nav-auto-btn').className = 'nav-idle';
+  document.getElementById('nav-auto-btn').className   = 'nav-idle';
   document.getElementById('nav-auto-btn').textContent = '▶ AUTO';
-  const total = msg.total_wp || 0;
-  // 在状态面板显示完成信息
-  document.getElementById('nav-progress').textContent = '✓ DONE (' + total + ')';
+  document.getElementById('nav-progress').textContent = '✓ DONE (' + (msg.total_wp || 0) + ')';
   document.getElementById('nav-status-panel').classList.add('visible');
 }
 
 function handleNavWarning(msg) {
   const warn = document.getElementById('warn-banner');
-  const txt = msg.msg || 'Navigation warning';
-  warn.textContent = '⚠ ' + txt.toUpperCase();
+  warn.textContent = '⚠ ' + (msg.msg || 'Navigation warning').toUpperCase();
   warn.classList.add('visible');
   setTimeout(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -794,7 +734,7 @@ function handleNavWarning(msg) {
   }, 5000);
 }
 
-// ── Nav mode & filter toggle helpers ───────────────────────
+// ── Nav mode & filter toggle ─────────────────────────────────
 function setNavMode(mode) {
   navMode = mode;
   document.getElementById('btn-p2p').classList.toggle('active',     mode === 'p2p');
@@ -809,7 +749,7 @@ function setFilterMode(mode) {
   sendMsg({ type: 'filter_mode', mode: mode });
 }
 
-// ── Direction label ─────────────────────────────────────────
+// ── Direction label ──────────────────────────────────────────
 function dirLabel(linear, angular) {
   const fwd  = linear  >  0.05;
   const back = linear  < -0.05;
@@ -817,14 +757,14 @@ function dirLabel(linear, angular) {
   const right= angular < -0.05;
   if (!fwd && !back && !left && !right) return '■ STOP';
   let s = '';
-  if (fwd)  s += '↑';
-  if (back) s += '↓';
-  if (left) s += '←';
-  if (right)s += '→';
+  if (fwd)   s += '↑';
+  if (back)  s += '↓';
+  if (left)  s += '←';
+  if (right) s += '→';
   return s;
 }
 
-// ── Joystick update ─────────────────────────────────────────
+// ── Joystick update (elements hidden, values still sent) ─────
 function updateJoyUI() {
   document.getElementById('joy-force').textContent   = currentForce.toFixed(2);
   document.getElementById('joy-linear').textContent  = fmt2(currentLinear)  + ' m/s';
@@ -832,7 +772,7 @@ function updateJoyUI() {
   document.getElementById('joy-dir').textContent     = dirLabel(currentLinear, currentAngular);
 }
 
-// ── nipplejs setup ──────────────────────────────────────────
+// ── nipplejs setup ───────────────────────────────────────────
 window.addEventListener('load', () => {
   const zone = document.getElementById('joystick-zone');
   const hint = document.getElementById('joystick-hint');
@@ -840,7 +780,7 @@ window.addEventListener('load', () => {
   const manager = nipplejs.create({
     zone: zone,
     mode: 'static',
-    position: { left: '50%', top: '50%' },
+    position: { left: '50%', top: '45%' },  // slightly above center to account for bottom bar
     size: 160,
     color: '#00d4ff',
     restOpacity: 0.6,
@@ -853,7 +793,6 @@ window.addEventListener('load', () => {
 
   manager.on('move', (evt, data) => {
     const force = Math.min(data.force, 1.0);
-    // nipplejs: angle in degrees, 0=right, 90=up (CCW)
     const angleRad = data.angle.radian;
     let rawX = Math.cos(angleRad) * force;  // right positive
     let rawY = Math.sin(angleRad) * force;  // up positive
@@ -864,7 +803,7 @@ window.addEventListener('load', () => {
       currentForce   = 0.0;
     } else {
       currentLinear  =  rawY * MAX_LINEAR  * speedRatio;   // up → forward
-      currentAngular = -rawX * MAX_ANGULAR * speedRatio;   // right → negative angular (Amiga convention)
+      currentAngular = -rawX * MAX_ANGULAR * speedRatio;   // right → negative angular
       currentForce   = force;
     }
     updateJoyUI();
@@ -876,54 +815,39 @@ window.addEventListener('load', () => {
     currentAngular = 0.0;
     currentForce   = 0.0;
     updateJoyUI();
-    // Immediate stop
     sendMsg({ type: "joystick", linear: 0.0, angular: 0.0, force: 0.0 });
     hint.style.display = 'block';
   });
 
-  // State toggle button bindings
+  // State toggle button
   const stateBtn = document.getElementById('state-btn');
   stateBtn.addEventListener('click', toggleControlState);
-  // 触摸设备防双触
-  stateBtn.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    toggleControlState();
-  });
+  stateBtn.addEventListener('touchend', (e) => { e.preventDefault(); toggleControlState(); });
 
-  // Record button bindings
+  // Record button
   const recBtn = document.getElementById('rec-btn');
-  recBtn.addEventListener('click', () => {
-    sendMsg({ type: "toggle_record" });
-  });
-  recBtn.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    sendMsg({ type: "toggle_record" });
-  });
+  recBtn.addEventListener('click', () => sendMsg({ type: "toggle_record" }));
+  recBtn.addEventListener('touchend', (e) => { e.preventDefault(); sendMsg({ type: "toggle_record" }); });
 
-  // Speed slider bindings
+  // Speed slider
   const speedSlider = document.getElementById('speed-slider');
   speedSlider.addEventListener('input', (e) => {
     speedRatio = parseInt(e.target.value) / 100;
     document.getElementById('speed-value').textContent = e.target.value + '%';
   });
 
-  // ── Navigation bindings ────────────────────────────────
   // CSV upload
-  const csvInput = document.getElementById('csv-file-input');
+  const csvInput  = document.getElementById('csv-file-input');
   const uploadBtn = document.getElementById('nav-upload-btn');
-  uploadBtn.addEventListener('click', () => csvInput.click());
+  uploadBtn.addEventListener('click',    () => csvInput.click());
   uploadBtn.addEventListener('touchend', (e) => { e.preventDefault(); csvInput.click(); });
   csvInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const csv = ev.target.result;
-      sendMsg({ type: 'upload_waypoints', csv: csv });
-    };
+    reader.onload = (ev) => sendMsg({ type: 'upload_waypoints', csv: ev.target.result });
     reader.readAsText(file);
-    // 重置 input 以便重复选同一文件
-    csvInput.value = '';
+    csvInput.value = '';  // allow re-selecting same file
   });
 
   // Nav mode buttons
@@ -935,11 +859,8 @@ window.addEventListener('load', () => {
   // AUTO start/stop button
   const autoBtn = document.getElementById('nav-auto-btn');
   function toggleNav() {
-    if (navActive) {
-      sendMsg({ type: 'nav_stop' });
-    } else {
-      sendMsg({ type: 'nav_start' });
-    }
+    if (navActive) sendMsg({ type: 'nav_stop' });
+    else           sendMsg({ type: 'nav_start' });
   }
   autoBtn.addEventListener('click', toggleNav);
   autoBtn.addEventListener('touchend', (e) => { e.preventDefault(); toggleNav(); });
