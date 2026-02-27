@@ -146,7 +146,20 @@ m2_system/
 | `a`     | `cmd_ang_rate += 0.1`                      |
 | `d`     | `cmd_ang_rate -= 0.1`                      |
 | `空格`  | 急停（`cmd_speed = cmd_ang_rate = 0`）     |
-| `\r`    | 切换 AUTO_READY ↔ AUTO_ACTIVE              |
+| `\r`    | 切换 AUTO_READY ↔ AUTO_ACTIVE；固件回报 `S:ACTIVE\n` 或 `S:READY\n` |
+
+### 固件状态回报（上位机 ← 固件）
+
+收到 `\r` 后，Feather M4 回复以下之一：
+
+```
+S:ACTIVE\n   — request_state 已设为 AUTO_ACTIVE
+S:READY\n    — request_state 已设为 AUTO_READY
+```
+
+固件启动时也会主动发送一次 `S:READY\n`，供上位机同步初始状态。
+`web_controller.py` 通过独立的 `SerialReader` 守护线程解析这些回报行，
+并向所有已连接的浏览器客户端广播 `state_status` WebSocket 消息。
 
 ### V 命令（新增，绝对速度）
 
@@ -396,6 +409,7 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
    - **V 命令**（多字节行）：`V{speed},{angular}\n` → 绝对速度设定（Web 摇杆使用）
 3. 以 20 Hz 发送 CAN RPDO1 帧，携带当前 `cmd_speed` + `cmd_ang_rate`
 4. 接收 Amiga Dashboard 的 TPDO1 状态帧，同步控制状态
+5. **响应 `\r`**：回报 `S:ACTIVE\n` 或 `S:READY\n`，让上位机始终获知真实 AUTO 状态；启动时发送一次 `S:READY\n` 以完成初始同步
 
 ---
 
@@ -410,6 +424,7 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 | WS 断线急停         | 浏览器断开时 `web_controller.py` 立即发送 `V0.00,0.00\n`   |
 | 摇杆死区            | `force < 0.15` → 发送零速度命令                            |
 | 速度钳位            | 固件将 V 命令值钳位到 `[-1.0, 1.0]`                        |
+| 固件状态同步        | AUTO 切换由固件串口回报（`S:ACTIVE`/`S:READY`）确认，UI 状态始终反映固件真实状态；固件重启后自动通过 `S:READY\n` 重新同步 |
 | 异常日志            | 所有异常均记录到 logger，禁止静默吞异常                    |
 
 ---

@@ -40,6 +40,7 @@ class HelloMainLoopApp:
         self._line_buf = []  # line buffer for multi-byte V commands
 
         self._register_message_handlers()
+        console.write(b"S:READY\n")  # notify host of initial firmware state on startup
 
     def _register_message_handlers(self):
         self.main_loop.command_handlers[CanOpenObject.TPDO1 | DASHBOARD_NODE_ID] = self._handle_amiga_tpdo1
@@ -61,8 +62,10 @@ class HelloMainLoopApp:
         elif char == "\r":
             if self.request_state == AmigaControlState.STATE_AUTO_READY:
                 self.request_state = AmigaControlState.STATE_AUTO_ACTIVE
+                console.write(b"S:ACTIVE\n")
             else:
                 self.request_state = AmigaControlState.STATE_AUTO_READY
+                console.write(b"S:READY\n")
         elif char == "w":
             self.cmd_speed += self.inc
         elif char == "s":

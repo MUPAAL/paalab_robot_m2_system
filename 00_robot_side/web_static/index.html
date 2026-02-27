@@ -361,8 +361,8 @@ let controlStateActive = false;  // false = AUTO_READY, true = AUTO_ACTIVE
 
 function toggleControlState() {
   sendMsg({ type: "toggle_state" });
-  controlStateActive = !controlStateActive;
-  updateStateBtn();
+  // 不再立即翻转状态，等服务端 state_status 确认，防止连续点击发多次指令
+  document.getElementById('state-btn').disabled = true;
 }
 
 function updateStateBtn() {
@@ -405,6 +405,7 @@ function connect() {
       if (msg.type === "status")        handleStatus(msg);
       if (msg.type === "rtk")           handleRTK(msg);
       if (msg.type === "record_status") handleRecordStatus(msg);
+      if (msg.type === "state_status")  handleStateStatus(msg);
     } catch(e) {}
   };
 }
@@ -451,9 +452,7 @@ function setStatus(online) {
     text.textContent = 'OFFLINE';
     warn.classList.add('visible');
     btn.disabled = true;
-    // 断线后重置本地状态（机器人会因看门狗停止并回到 AUTO_READY）
-    controlStateActive = false;
-    updateStateBtn();
+    // 断线后保持最后已知状态，重连后由服务端推送 state_status 同步
   }
 }
 
@@ -526,6 +525,13 @@ function handleRTK(msg) {
   document.getElementById('rtk-sats').textContent = (msg.num_sats !== null && msg.num_sats !== undefined) ? msg.num_sats : '--';
   document.getElementById('rtk-hdop').textContent = fmtCoord(msg.hdop, 2);
   document.getElementById('rtk-spd').textContent  = fmtCoord(msg.speed_knots, 2);
+}
+
+// ── State status update ─────────────────────────────────
+function handleStateStatus(msg) {
+  controlStateActive = msg.active;
+  updateStateBtn();
+  document.getElementById('state-btn').disabled = false;  // 解除按钮禁用
 }
 
 // ── Record status update ─────────────────────────────────

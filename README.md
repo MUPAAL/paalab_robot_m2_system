@@ -151,7 +151,20 @@ Key differences from Mode B:
 | `a`     | `cmd_ang_rate += 0.1`                    |
 | `d`     | `cmd_ang_rate -= 0.1`                    |
 | `Space` | Emergency stop (`cmd_speed = cmd_ang_rate = 0`) |
-| `\r`    | Toggle AUTO_READY ↔ AUTO_ACTIVE          |
+| `\r`    | Toggle AUTO_READY ↔ AUTO_ACTIVE; firmware replies `S:ACTIVE\n` or `S:READY\n` |
+
+### Firmware state report (host ← firmware)
+
+After receiving `\r`, the Feather M4 replies with one of:
+
+```
+S:ACTIVE\n   — request_state set to AUTO_ACTIVE
+S:READY\n    — request_state set to AUTO_READY
+```
+
+On startup the firmware also sends `S:READY\n` once so the host can synchronise.
+`web_controller.py` parses these lines in a dedicated `SerialReader` daemon thread and
+broadcasts a `state_status` WebSocket message to all connected browser clients.
 
 ### V command (new, absolute velocity)
 
@@ -402,6 +415,8 @@ Workflow:
    - **V command** (multi-byte line): `V{speed},{angular}\n` → absolute velocity (set by web joystick)
 3. Send CAN RPDO1 frame at 20 Hz with current `cmd_speed` + `cmd_ang_rate`.
 4. Receive TPDO1 status frames from the Amiga Dashboard to sync control state.
+5. **Reply to `\r`** with `S:ACTIVE\n` or `S:READY\n` so the host always knows the actual AUTO state.
+   On startup, send `S:READY\n` once to initialise the host-side state.
 
 ---
 
@@ -416,6 +431,7 @@ Workflow:
 | WS disconnect stop      | `web_controller.py` sends `V0.00,0.00\n` when browser disconnects    |
 | Joystick dead zone      | `force < 0.15` → zero velocity command sent                           |
 | Velocity clamp          | Firmware clamps V command values to `[-1.0, 1.0]`                    |
+| Firmware state sync     | AUTO toggle is confirmed by firmware serial reply (`S:ACTIVE`/`S:READY`); UI state always reflects actual firmware state. Firmware restart auto-resynchronises via `S:READY\n` on boot. |
 | Exception logging       | All exceptions are logged; silent swallowing is forbidden             |
 
 ---

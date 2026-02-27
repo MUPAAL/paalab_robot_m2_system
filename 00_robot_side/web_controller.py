@@ -237,6 +237,7 @@ class WebController:
         self._clients_lock = asyncio.Lock()
         self._last_heartbeat: float = time.time()
         self._serial_ok = False
+        self._auto_active = False  # tracks current AUTO state (updated by serial reader thread)
         self._loop: asyncio.AbstractEventLoop | None = None
 
     # ── Serial ────────────────────────────────────────────
@@ -288,11 +289,83 @@ class WebController:
                 logger.error(f"Serial raw write failed: {e}")
                 self._serial_ok = False
 
+    # ── Broadcast helper ──────────────────────────────────
+    async def _broadcast(self, obj: dict) -> None:
+        """Broadcast a JSON message to all connected clients."""
+        msg = json.dumps(obj)
+        async with self._clients_lock:
+            clients = set(self._clients)
+        dead = set()
+        for ws in clients:
+            try:
+                await ws.send(msg)
+            except Exception:
+                dead.add(ws)
+        if dead:
+            async with self._clients_lock:
+                self._clients -= dead
+
+    # ── Serial reader thread ───────────────────────────────
+    def _start_serial_reader(self) -> None:
+        """Start daemon thread that reads status lines from Feather M4."""
+        t = threading.Thread(target=self._serial_reader_thread, name="SerialReader", daemon=True)
+        t.start()
+        logger.info("SerialReader thread started")
+
+    def _serial_reader_thread(self) -> None:
+        """Reads serial output from Feather M4; parses S:ACTIVE / S:READY lines."""
+        buf = b""
+        while True:
+            try:
+                with self._ser_lock:
+                    if self._ser is None or not self._ser.is_open:
+                        buf = b""
+                        time.sleep(0.1)
+                        continue
+                    n = self._ser.in_waiting
+                    chunk = self._ser.read(n) if n > 0 else b""
+            except serial.SerialException as e:
+                logger.error(f"SerialReader: read error: {e}")
+                buf = b""
+                time.sleep(0.1)
+                continue
+
+            if chunk:
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    self._handle_serial_line(line.strip())
+            else:
+                time.sleep(0.01)
+
+    def _handle_serial_line(self, line: bytes) -> None:
+        """Process a status line received from Feather M4."""
+        if line == b"S:ACTIVE":
+            new_state = True
+        elif line == b"S:READY":
+            new_state = False
+        else:
+            return  # ignore unrecognised serial output (e.g. debug prints)
+        if self._auto_active == new_state:
+            return  # state unchanged, skip broadcast
+        self._auto_active = new_state
+        logger.info(f"SerialReader: firmware state -> {'ACTIVE' if new_state else 'READY'}")
+        if self._loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast({"type": "state_status", "active": new_state}),
+                self._loop,
+            )
+
     # ── WebSocket handler ─────────────────────────────────
     async def _ws_handler(self, websocket) -> None:
         async with self._clients_lock:
             self._clients.add(websocket)
         logger.info(f"WebSocket client connected: {websocket.remote_address}")
+        # Push current AUTO state to new client so page refresh does not cause stale UI
+        try:
+            await websocket.send(json.dumps({"type": "state_status", "active": self._auto_active}))
+        except Exception as e:
+            logger.warning(f"WebSocket: failed to send initial state_status: {e}")
         try:
             async for raw in websocket:
                 try:
@@ -321,7 +394,8 @@ class WebController:
                 elif msg_type == "toggle_state":
                     self._last_heartbeat = time.time()
                     self._send_raw(b"\r")
-                    logger.info("WebSocket: state toggle command sent (\\r)")
+                    # _auto_active is updated by the serial reader thread from firmware reply, not here
+                    logger.info("WebSocket: state toggle command sent (\\r), awaiting firmware confirmation")
 
                 elif msg_type == "toggle_record":
                     await self._handle_toggle_record()
@@ -409,6 +483,11 @@ class WebController:
             if elapsed > WATCHDOG_TIMEOUT:
                 logger.warning(f"Watchdog triggered! No heartbeat for {elapsed:.1f}s — sending emergency stop")
                 self._send_velocity(0.0, 0.0)
+                # On watchdog trigger, send \r to flip firmware back to READY;
+                # _auto_active is updated by the serial reader thread once firmware replies S:READY
+                if self._auto_active:
+                    self._send_raw(b"\r")  # firmware replies S:READY; serial reader handles state + broadcast
+                    logger.info("Watchdog: sent \\r to reset AUTO state, awaiting firmware confirmation")
                 # Reset timer to avoid flooding logs with repeated stop commands
                 self._last_heartbeat = time.time()
 
@@ -485,6 +564,7 @@ class WebController:
     async def serve(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._last_heartbeat = time.time()
+        self._start_serial_reader()  # start daemon thread to read firmware state reports
 
         async with websockets.serve(
             self._ws_handler,
