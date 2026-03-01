@@ -372,15 +372,15 @@ class WebController:
             return
         csv_text = msg.get("csv", "")
         if not isinstance(csv_text, str) or not csv_text.strip():
-            logger.warning("WebSocket: upload_waypoints: CSV 为空")
+            logger.warning("WebSocket: upload_waypoints: CSV is empty")
             await self._broadcast({"type": "waypoints_loaded", "count": 0, "error": "empty CSV"})
             return
         try:
             count = self._nav_engine.load_waypoints(csv_text)
             await self._broadcast({"type": "waypoints_loaded", "count": count})
-            logger.info(f"WebSocket: 航点已加载，共 {count} 个")
+            logger.info(f"WebSocket: waypoints loaded, total={count}")
         except Exception as e:
-            logger.error(f"WebSocket: 航点加载失败: {e}")
+            logger.error(f"WebSocket: failed to load waypoints: {e}")
             await self._broadcast({"type": "waypoints_loaded", "count": 0, "error": str(e)})
 
     async def _handle_nav_start(self) -> None:
@@ -392,7 +392,7 @@ class WebController:
             status = self._nav_engine.get_status()
             await self._broadcast({
                 "type":  "nav_status",
-                "error": "无法启动导航（无航点或 GPS 信号不足）",
+                "error": "Unable to start navigation (no waypoints or insufficient GPS signal)",
                 **status,
             })
         else:
@@ -407,7 +407,7 @@ class WebController:
             status = self._nav_engine.get_status()
             await self._broadcast({
                 "type":  "nav_status",
-                "error": "无法启动导航（无航点）",
+                "error": "Unable to start navigation (no waypoints)",
                 **status,
             })
         else:
@@ -430,7 +430,7 @@ class WebController:
             self._nav_engine.set_nav_mode(mode)
             await self._broadcast(self._nav_engine.get_status())
         except ValueError:
-            logger.warning(f"WebSocket: 未知导航模式: {mode_str!r}")
+            logger.warning(f"WebSocket: unknown navigation mode: {mode_str!r}")
 
     async def _handle_filter_mode(self, msg: dict) -> None:
         """Switch GPS filter mode (moving_avg / kalman)."""
@@ -442,7 +442,7 @@ class WebController:
             self._nav_engine.set_filter_mode(mode)
             await self._broadcast(self._nav_engine.get_status())
         except ValueError:
-            logger.warning(f"WebSocket: 未知滤波器模式: {mode_str!r}")
+            logger.warning(f"WebSocket: unknown filter mode: {mode_str!r}")
 
     # ── IMU broadcast loop (20 Hz) ────────────────────────
     async def _imu_broadcast_loop(self) -> None:
