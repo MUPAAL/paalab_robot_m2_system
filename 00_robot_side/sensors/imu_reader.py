@@ -1,14 +1,14 @@
 """
 IMU Reader — OAK-D BNO085 via depthai
 
-公共接口：
+Public API:
     IMUReader(threading.Thread, daemon=True)
-        .get_data() -> dict   — 线程安全获取最新 IMU 快照（对齐 RTKReader 接口）
-        .is_available -> bool  — depthai pipeline 启动后置 True
+        .get_data() -> dict   — thread-safe access to the latest IMU snapshot (aligned with RTKReader API)
+        .is_available -> bool  — set to True once the depthai pipeline starts
 
     quaternion_to_compass(real, i, j, k) -> (bearing, cardinal)
 
-    # 向后兼容的模块级全局（已废弃，优先使用 IMUReader.get_data()）
+    # Backward-compatible module-level globals (deprecated; prefer IMUReader.get_data())
     imu_lock, imu_data, imu_available
 """
 
@@ -20,7 +20,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# ── 模块级全局 IMU 数据（线程安全） ─────────────────────────
+# ── Module-level global IMU data (thread-safe) ───────────
 imu_lock = threading.Lock()
 imu_data: dict = {
     "accel":   {"x": 0.0, "y": 0.0, "z": 0.0},
@@ -61,7 +61,7 @@ def quaternion_to_compass(real: float, i: float, j: float, k: float) -> tuple[fl
 class IMUReader(threading.Thread):
     """Daemon thread: continuously reads IMU packets from OAK-D and updates module-level imu_data.
 
-    优先使用 get_data() / is_available 属性访问数据，而非直接读取模块级全局变量。
+    Prefer accessing data via get_data() / is_available instead of reading module globals directly.
     """
 
     def __init__(self) -> None:
@@ -69,11 +69,11 @@ class IMUReader(threading.Thread):
 
     @property
     def is_available(self) -> bool:
-        """depthai pipeline 是否成功启动。"""
+        """Whether the depthai pipeline started successfully."""
         return imu_available
 
     def get_data(self) -> dict:
-        """线程安全地返回最新 IMU 快照（对齐 RTKReader.get_data() 接口）。"""
+        """Return the latest IMU snapshot in a thread-safe way (aligned with RTKReader.get_data())."""
         with imu_lock:
             return dict(imu_data)
 
@@ -127,7 +127,7 @@ class IMUReader(threading.Thread):
                 # Fallback: infer from all-zero quaternion check
                 accuracy = 0 if (w == 0.0 and xi == 0.0 and yj == 0.0 and zk == 0.0) else 3
             calibrated = accuracy >= 2
-            bearing, cardinal = quaternion_to_compass(w, xi, yj, zk) if calibrated else (0.0, "N")
+            bearing, cardinal = quaternion_to_compass(w, xi, yj, zk)  # Always compute; frontend uses accuracy to show calibration state
 
             with imu_lock:
                 imu_data = {

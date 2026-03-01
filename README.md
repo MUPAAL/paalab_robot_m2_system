@@ -162,6 +162,7 @@ web_controller.py
 
 Joystick is automatically disabled during autonomous navigation.
 The browser shows real-time progress: waypoint index, distance to target, bearing, and fix quality.
+The compass HUD displays live bearing at all calibration levels (UNCAL / LOW / GOOD / PRECISE); the accuracy label updates in real-time.
 
 ---
 
@@ -211,7 +212,8 @@ Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are act
 | `toggle_state`      | —                                               | Toggle AUTO_READY ↔ AUTO_ACTIVE      |
 | `toggle_record`     | —                                               | Start / stop CSV recording           |
 | `upload_waypoints`  | `{csv: "id,lat,lon,tolerance_m,max_speed\n…"}` | Upload QGIS waypoint CSV             |
-| `nav_start`         | —                                               | Begin autonomous navigation          |
+| `nav_start`         | —                                               | Begin autonomous navigation (requires GPS fix ≥ 1) |
+| `nav_start_force`   | —                                               | Force-start navigation ignoring GPS fix check |
 | `nav_stop`          | —                                               | Stop autonomous navigation           |
 | `nav_mode`          | `{mode: "p2p" \| "pure_pursuit"}`              | Switch navigation algorithm          |
 | `filter_mode`       | `{mode: "moving_avg" \| "kalman"}`             | Switch GPS filter                    |
@@ -240,11 +242,11 @@ Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are act
 | `S`     | Backward (−0.1 m/s)                                |
 | `A`     | Turn left (+0.1 rad/s)                             |
 | `D`     | Turn right (−0.1 rad/s)                            |
-| `Space` | Emergency stop (also sent automatically on key release) |
+| `Space` | Emergency stop (also sent automatically within ≤100 ms when all keys released) |
 | `Enter` | Toggle state: AUTO_READY ↔ AUTO_ACTIVE             |
 | `Q`     | Quit                                               |
 
-> Direction keys are sent repeatedly at 10 Hz. Releasing all direction keys immediately sends an emergency stop.
+> Direction keys are sent repeatedly at 10 Hz. Releasing all direction keys causes the repeat loop to send an emergency stop within ≤100 ms (Linux evdev: avoids false key-release events during long-press).
 
 ---
 
@@ -364,7 +366,7 @@ disconnect / no heartbeat → watchdog stops robot after 2 s
 2. In the browser, tap **📂 UPLOAD CSV** and select the file
 3. Confirm waypoint count displayed next to the button
 4. Choose navigation algorithm (**P2P** or **PURSUIT**) and GPS filter (**MOV-AVG** or **KALMAN**)
-5. Verify RTK fix quality ≥ 1 in the RTK panel
+5. Verify RTK fix quality ≥ 1 in the RTK panel; if GPS is unavailable, tap **FORCE** instead of **▶ AUTO** to skip the fix check
 6. Tap **▶ AUTO** — the joystick zone shows "AUTO MODE" and is disabled
 7. Monitor progress in the navigation status panel (waypoint index, distance, bearing)
 8. On completion the robot stops automatically; tap **■ STOP** at any time to abort
@@ -455,7 +457,7 @@ Workflow:
 |-------------------------|----------------------------------------------------------------------|
 | Watchdog timer          | No command (including heartbeat) for 2 s → automatic emergency stop  |
 | Command whitelist       | `SerialWriter` only passes `w/s/a/d/space/\r`                        |
-| Key-release stop        | All direction keys released → emergency stop sent immediately         |
+| Key-release stop        | All direction keys released → repeat loop sends emergency stop within ≤100 ms |
 | TCP disconnect stop     | `robot_receiver.py` sends emergency stop when client disconnects      |
 | WS disconnect stop      | `web_controller.py` sends `V0.00,0.00\n` when browser disconnects    |
 | Joystick dead zone      | `force < 0.15` → zero velocity command sent                           |

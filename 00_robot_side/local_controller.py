@@ -119,13 +119,6 @@ class LocalController:
                 remaining = len(self._pressed_keys)
             logger.debug(f"Key released: {repr(char)}, keys still held: {remaining}")
 
-            if remaining == 0:
-                try:
-                    self._serial.emergency_stop()
-                except Exception as e:
-                    logger.error(f"Emergency stop serial error: {e}")
-                logger.info("All keys released, emergency stop sent")
-
     @staticmethod
     def _key_to_char(key) -> str | None:
         try:

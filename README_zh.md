@@ -165,6 +165,7 @@ web_controller.py
 ```
 
 自主导航期间摇杆自动禁用。浏览器实时显示航点进度、距目标距离、方位角和定位质量。
+罗盘 HUD 在任意校准级别（UNCAL / LOW / GOOD / PRECISE）下均实时显示方位角，精度标签同步更新。
 
 ---
 
@@ -218,7 +219,8 @@ S:READY\n    — request_state 已设为 AUTO_READY
 | `toggle_state`      | —                                                   | 切换 AUTO_READY ↔ AUTO_ACTIVE  |
 | `toggle_record`     | —                                                   | 开始 / 停止 CSV 录制           |
 | `upload_waypoints`  | `{csv: "id,lat,lon,tolerance_m,max_speed\n…"}`     | 上传 QGIS 航点 CSV             |
-| `nav_start`         | —                                                   | 开始自主导航                   |
+| `nav_start`         | —                                                   | 开始自主导航（需 GPS fix ≥ 1） |
+| `nav_start_force`   | —                                                   | 强制启动导航（跳过 GPS fix 检查）|
 | `nav_stop`          | —                                                   | 停止自主导航                   |
 | `nav_mode`          | `{mode: "p2p" \| "pure_pursuit"}`                  | 切换导航算法                   |
 | `filter_mode`       | `{mode: "moving_avg" \| "kalman"}`                 | 切换 GPS 滤波器                |
@@ -247,11 +249,11 @@ S:READY\n    — request_state 已设为 AUTO_READY
 | `S`     | 后退（速度 −0.1 m/s）                   |
 | `A`     | 左转（角速度 +0.1 rad/s）               |
 | `D`     | 右转（角速度 −0.1 rad/s）               |
-| `空格`  | 紧急停止（松开所有按键时也自动触发）    |
+| `空格`  | 紧急停止（松开所有按键后 ≤100 ms 内自动触发）    |
 | `Enter` | 切换状态：AUTO_READY ↔ AUTO_ACTIVE      |
 | `Q`     | 退出程序                                |
 
-> 方向键持续发送（10 Hz），松开所有方向键后自动发送急停。
+> 方向键持续发送（10 Hz），松开所有方向键后 repeat loop 在 ≤100 ms 内自动发送急停（Linux evdev 模式下可避免长按时产生伪 release 事件导致卡顿）。
 
 ---
 
@@ -371,7 +373,7 @@ force < 0.15      → 死区，机器人停止
 2. 在浏览器中点击 **📂 UPLOAD CSV** 并选择文件
 3. 确认按钮旁显示的航点数量
 4. 选择导航算法（**P2P** 或 **PURSUIT**）和 GPS 滤波器（**MOV-AVG** 或 **KALMAN**）
-5. 在 RTK 面板确认定位质量 ≥ 1
+5. 在 RTK 面板确认定位质量 ≥ 1；若 GPS 尚未定位，可点击 **FORCE** 按钮跳过 fix 检查强制启动
 6. 点击 **▶ AUTO** — 摇杆区显示"AUTO MODE"并禁用
 7. 在导航状态面板监控进度（航点序号、距离、方位角）
 8. 完成后机器人自动停车；随时点击 **■ STOP** 可中止
@@ -465,7 +467,7 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 |-------------------------|------------------------------------------------------------------------------|
 | 看门狗定时器            | 2 秒内无任何命令（含心跳）→ 自动发送急停                                     |
 | 命令白名单              | `SerialWriter` 仅允许 `w/s/a/d/空格/\r` 通过                                 |
-| 松键急停                | 所有方向键释放后立即发送急停字符                                             |
+| 松键急停                | 所有方向键释放后，repeat loop 在 ≤100 ms 内发送急停                         |
 | TCP 断线急停            | 客户端断开时 `robot_receiver.py` 立即发送急停                                |
 | WS 断线急停             | 浏览器断开时 `web_controller.py` 立即发送 `V0.00,0.00\n`                     |
 | 摇杆死区                | `force < 0.15` → 发送零速度命令                                              |

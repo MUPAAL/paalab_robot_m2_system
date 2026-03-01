@@ -126,7 +126,7 @@ class RTKReader(threading.Thread):
         Index:    0        1      2  3        4  5  6   7   8   9
         """
         try:
-            if len(parts) < 10:
+            if len(parts) < 11:
                 logger.warning(f"RTKReader: GGA too short: {parts}")
                 return
 
@@ -135,8 +135,8 @@ class RTKReader(threading.Thread):
             hdop        = float(parts[8]) if parts[8] else None
             alt         = float(parts[9]) if parts[9] else None
 
-            lat = self._nmea_to_decimal(parts[1], parts[2]) if (parts[1] and parts[2]) else None
-            lon = self._nmea_to_decimal(parts[3], parts[4]) if (parts[3] and parts[4]) else None
+            lat = self._nmea_to_decimal(parts[2], parts[3]) if (parts[2] and parts[3]) else None
+            lon = self._nmea_to_decimal(parts[4], parts[5]) if (parts[4] and parts[5]) else None
 
             with self._lock:
                 self._data["lat"]         = lat

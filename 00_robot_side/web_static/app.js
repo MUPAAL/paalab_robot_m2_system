@@ -410,6 +410,11 @@ window.addEventListener('load', () => {
   autoBtn.addEventListener('click', toggleNav);
   autoBtn.addEventListener('touchend', (e) => { e.preventDefault(); toggleNav(); });
 
+  // FORCE button — start navigation ignoring GPS fix check
+  const forceBtn = document.getElementById('nav-force-btn');
+  forceBtn.addEventListener('click', () => sendMsg({ type: 'nav_start_force' }));
+  forceBtn.addEventListener('touchend', (e) => { e.preventDefault(); sendMsg({ type: 'nav_start_force' }); });
+
   // Start WebSocket
   connect();
 });

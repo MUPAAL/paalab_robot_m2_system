@@ -1,17 +1,17 @@
 """
-nav_engine — 导航引擎主状态机
+nav_engine — main state machine for autonomous navigation
 
 NavigationEngine:
-    - 接收 IMU 数据（20 Hz）驱动控制循环
-    - 接收 RTK GPS 数据（1 Hz）更新滤波器
-    - 管理航点序列、GPS 滤波器、控制器
-    - 通过 send_velocity_fn 发出速度指令
-    - 通过 broadcast_fn（异步协程）广播导航状态
+    - Receives IMU data (20 Hz) to drive the control loop
+    - Receives RTK GPS data (1 Hz) to update filters
+    - Manages waypoint sequence, GPS filters, and controllers
+    - Sends velocity commands via send_velocity_fn
+    - Broadcasts navigation status via broadcast_fn (async coroutine)
 
-状态枚举：
+State enum:
     NavState: IDLE | NAVIGATING | FINISHED
 
-模式枚举：
+Mode enums:
     NavMode:    P2P | PURE_PURSUIT
     FilterMode: MOVING_AVG | KALMAN
 """
@@ -33,7 +33,7 @@ from navigation.controller import P2PController, PurePursuitController
 logger = logging.getLogger(__name__)
 
 
-# ── 枚举 ──────────────────────────────────────────────────
+# ── Enums ─────────────────────────────────────────────────
 class NavState(Enum):
     IDLE       = auto()
     NAVIGATING = auto()
@@ -50,14 +50,14 @@ class FilterMode(Enum):
     KALMAN     = "kalman"
 
 
-# ── 导航引擎 ──────────────────────────────────────────────
+# ── Navigation engine ─────────────────────────────────────
 class NavigationEngine:
-    """GPS + IMU 自主路径导航引擎。
+    """GPS + IMU autonomous path navigation engine.
 
     Args:
-        send_velocity_fn : Callable[[float, float], None]，发送速度指令
-        broadcast_fn     : 异步广播函数 async(dict) -> None
-        loop             : asyncio 事件循环（用于跨线程调度广播）
+        send_velocity_fn : Callable[[float, float], None], sends velocity commands
+        broadcast_fn     : async broadcast function async(dict) -> None
+        loop             : asyncio event loop (used for cross-thread broadcast scheduling)
     """
 
     def __init__(
@@ -72,47 +72,54 @@ class NavigationEngine:
 
         self._lock = threading.Lock()
 
-        # 状态
+        # State
         self._state: NavState   = NavState.IDLE
         self._nav_mode: NavMode       = NavMode.P2P
         self._filter_mode: FilterMode = FilterMode.MOVING_AVG
 
-        # 航点管理
+        # Waypoint management
         self._wp_mgr = WaypointManager()
 
-        # 滤波器
+        # Filters
         self._ma_filter  = MovingAverageFilter()
         self._kf_filter  = KalmanFilter()
 
-        # 控制器
+        # Controllers
         self._p2p_ctrl = P2PController()
         self._pp_ctrl  = PurePursuitController()
 
-        # IMU 状态
-        self._robot_bearing: float | None = None  # None = 未校准
+        # IMU state
+        self._robot_bearing: float | None = None  # None = not calibrated
         self._last_imu_ts:   float = 0.0
         self._last_control_ts: float = 0.0
 
-        # RTK 状态
+        # RTK state
         self._fix_quality: int   = 0
         self._last_gps_ts: float = 0.0
         self._gps_warning_sent: bool = False
 
-        # 广播节流
+        # Broadcast throttling
         self._broadcast_counter: int = 0
 
-    # ── 公共接口 ──────────────────────────────────────────
+    # ── Public API ────────────────────────────────────────
     def load_waypoints(self, csv_text: str) -> int:
-        """加载 CSV 航点文本，返回加载数量。"""
+        """Load waypoint CSV text and return the number of loaded waypoints."""
         with self._lock:
             count = self._wp_mgr.load_csv(csv_text)
             return count
 
-    def start(self) -> bool:
-        """开始自主导航。需要有航点且 GPS fix_quality >= 1。
+    def start(self, force: bool = False) -> bool:
+        """Start autonomous navigation.
+
+        Requires available waypoints and GPS fix_quality >= 1
+        (force=True can bypass the fix check).
+
+        Args:
+            force: When True, ignore fix_quality and start directly
+                (for debugging / no-GPS testing).
 
         Returns:
-            True 表示成功启动，False 表示条件不满足。
+            True if started successfully; False if prerequisites are not met.
         """
         with self._lock:
             if self._state == NavState.NAVIGATING:
@@ -122,12 +129,15 @@ class NavigationEngine:
                 logger.warning("NavigationEngine: 无有效航点，无法启动")
                 return False
             if self._fix_quality < 1:
-                logger.warning(f"NavigationEngine: GPS fix_quality={self._fix_quality}，不足以导航")
-                return False
+                if force:
+                    logger.warning(f"NavigationEngine: GPS fix_quality=0，强制启动（force=True）")
+                else:
+                    logger.warning(f"NavigationEngine: GPS fix_quality={self._fix_quality}，不足以导航")
+                    return False
 
             self._wp_mgr.reset()
-            # 不重置滤波器——保留已有 GPS 历史以便立即可用
-            # 重置控制器 PID 避免积分饱和残留
+            # Do not reset filters—keep existing GPS history for immediate reuse
+            # Reset controller PID states to avoid integral windup residue
             self._p2p_ctrl.reset()
             self._pp_ctrl.reset()
             self._gps_warning_sent = False
@@ -142,7 +152,7 @@ class NavigationEngine:
         return True
 
     def stop(self) -> None:
-        """停止导航，发送停车指令。"""
+        """Stop navigation and send a zero-velocity command."""
         with self._lock:
             if self._state == NavState.IDLE:
                 return
@@ -167,7 +177,7 @@ class NavigationEngine:
         logger.info(f"NavigationEngine: 滤波器切换 → {mode.value}")
 
     def get_status(self) -> dict:
-        """返回当前导航状态字典（线程安全）。"""
+        """Return the current navigation status dict (thread-safe)."""
         with self._lock:
             wp = self._wp_mgr.current
             prog = self._wp_mgr.progress
@@ -200,11 +210,12 @@ class NavigationEngine:
                 "fix_quality":    self._fix_quality,
             }
 
-    # ── 传感器回调 ────────────────────────────────────────
+    # ── Sensor callbacks ─────────────────────────────────
     def on_imu(self, imu_data: dict) -> None:
-        """IMU 数据回调（20 Hz）。
+        """IMU callback (20 Hz).
 
-        更新机器人朝向，驱动卡尔曼预测步骤，调用控制步骤。
+        Updates robot heading, runs the Kalman prediction step,
+        and triggers the control step.
         """
         try:
             compass = imu_data.get("compass", {})
@@ -220,11 +231,11 @@ class NavigationEngine:
             with self._lock:
                 self._robot_bearing = bearing
 
-                # 卡尔曼预测（用 IMU 加速度作为控制输入）
+                # Kalman prediction (use IMU acceleration as control input)
                 if self._filter_mode == FilterMode.KALMAN and self._kf_filter.is_ready:
                     accel = imu_data.get("accel", {})
                     ax, ay = accel.get("x", 0.0), accel.get("y", 0.0)
-                    # 机体加速度（前向=x，侧向=y）旋转到 NED
+                    # Rotate body-frame acceleration (forward=x, lateral=y) into NED
                     rad = math.radians(bearing)
                     a_north = ax * math.cos(rad) - ay * math.sin(rad)
                     a_east  = ax * math.sin(rad) + ay * math.cos(rad)
@@ -233,16 +244,16 @@ class NavigationEngine:
                 if self._state != NavState.NAVIGATING:
                     return
 
-            # 控制步骤（持锁外执行以减少锁持有时长）
+            # Control step (run outside the lock to reduce lock hold time)
             self._control_step(now)
 
         except Exception as e:
             logger.error(f"NavigationEngine.on_imu: {e}")
 
     def on_rtk(self, rtk_data: dict) -> None:
-        """RTK GPS 数据回调（1 Hz）。
+        """RTK GPS callback (1 Hz).
 
-        推送 GPS 到活跃滤波器，检测 GPS 超时。
+        Pushes GPS into the active filter and checks GPS timeout.
         """
         try:
             lat = rtk_data.get("lat")
@@ -267,14 +278,14 @@ class NavigationEngine:
         except Exception as e:
             logger.error(f"NavigationEngine.on_rtk: {e}")
 
-    # ── 控制步骤（内部，每 50ms）──────────────────────────
+    # ── Control step (internal, every 50 ms) ─────────────
     def _control_step(self, now: float) -> None:
-        """核心控制循环，由 on_imu 以约 20 Hz 调用。"""
+        """Core control loop, called by on_imu at about 20 Hz."""
         with self._lock:
             if self._state != NavState.NAVIGATING:
                 return
 
-            # GPS 超时检测
+            # GPS timeout detection
             if self._last_gps_ts > 0:
                 gps_age = now - self._last_gps_ts
                 if gps_age > NAV_GPS_TIMEOUT_S and not self._gps_warning_sent:
@@ -284,9 +295,9 @@ class NavigationEngine:
                     self._schedule_broadcast_unsafe({"type": "nav_warning", "msg": "GPS timeout"})
                     return
                 if self._gps_warning_sent:
-                    return  # 超时中，等 GPS 恢复（on_rtk 会清除 _gps_warning_sent）
+                    return  # In timeout state; wait for GPS recovery (on_rtk clears _gps_warning_sent)
 
-            # 获取滤波后的位置
+            # Get filtered position
             if self._filter_mode == FilterMode.MOVING_AVG:
                 if not self._ma_filter.is_ready:
                     return
@@ -299,7 +310,7 @@ class NavigationEngine:
             robot_lat, robot_lon = pos
 
             if self._robot_bearing is None:
-                return  # 罗盘未校准
+                return  # Compass not calibrated
 
             wp = self._wp_mgr.current
             if wp is None:
@@ -310,13 +321,13 @@ class NavigationEngine:
             if dt <= 0 or dt > 1.0:
                 dt = 0.05
 
-            # 距离和到达判定
+            # Distance and arrival check
             distance = haversine_distance(robot_lat, robot_lon, wp.lat, wp.lon)
             switched = self._wp_mgr.update(distance, self._fix_quality)
 
             if switched:
                 if self._wp_mgr.is_finished:
-                    # 全部航点完成
+                    # All waypoints completed
                     self._state = NavState.FINISHED
                     total = self._wp_mgr.progress[1]
                     logger.info(f"NavigationEngine: 所有 {total} 个航点完成！")
@@ -325,12 +336,12 @@ class NavigationEngine:
                     self._schedule_broadcast_unsafe(self._get_status_unsafe())
                     return
                 else:
-                    # 切换到下一个航点
+                    # Switch to next waypoint
                     self._p2p_ctrl.reset()
                     self._pp_ctrl.reset()
                     wp = self._wp_mgr.current
 
-            # 计算控制输出
+            # Compute control output
             bearing = self._robot_bearing
             if self._nav_mode == NavMode.PURE_PURSUIT:
                 linear, angular = self._pp_ctrl.compute(
@@ -342,29 +353,29 @@ class NavigationEngine:
                     robot_lat, robot_lon, bearing, wp, dt,
                 )
 
-            # 限幅
+            # Clamp to configured limits
             linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
             angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
 
         self._send_velocity(linear, angular)
 
-        # 4Hz 广播状态
+        # Broadcast status at 4 Hz
         self._broadcast_counter += 1
         if self._broadcast_counter % 5 == 0:
             self._schedule_broadcast()
 
-    # ── 广播辅助 ─────────────────────────────────────────
+    # ── Broadcast helpers ────────────────────────────────
     def _schedule_broadcast(self) -> None:
-        """从工作线程安全地调度异步广播（不持锁）。"""
+        """Thread-safely schedule async broadcast from worker thread (without lock)."""
         status = self.get_status()
         asyncio.run_coroutine_threadsafe(self._broadcast(status), self._loop)
 
     def _schedule_broadcast_unsafe(self, msg: dict) -> None:
-        """已持锁时调度广播（从锁内调用，不再获取锁）。"""
+        """Schedule broadcast while already holding lock (called from lock scope)."""
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
     def _get_status_unsafe(self) -> dict:
-        """不加锁的 get_status 内部版本（已持锁时调用）。"""
+        """Internal unlocked get_status version (call only when lock is already held)."""
         wp = self._wp_mgr.current
         prog = self._wp_mgr.progress
         return {

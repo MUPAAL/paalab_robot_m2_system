@@ -274,7 +274,7 @@ class WebController:
 
                 elif msg_type == "joystick":
                     self._last_heartbeat = time.time()  # joystick messages also reset watchdog
-                    # 自动导航中忽略摇杆
+                    # Ignore joystick commands while autonomous navigation is active
                     nav_active = (
                         self._nav_engine is not None
                         and self._nav_engine.get_status().get("state") == "navigating"
@@ -304,6 +304,9 @@ class WebController:
 
                 elif msg_type == "nav_start":
                     await self._handle_nav_start()
+
+                elif msg_type == "nav_start_force":
+                    await self._handle_nav_start_force()
 
                 elif msg_type == "nav_stop":
                     await self._handle_nav_stop()
@@ -364,7 +367,7 @@ class WebController:
 
     # ── Navigation handlers ───────────────────────────────
     async def _handle_upload_waypoints(self, msg: dict) -> None:
-        """处理客户端上传的 CSV 航点文本。"""
+        """Handle waypoint CSV text uploaded by the client."""
         if self._nav_engine is None:
             return
         csv_text = msg.get("csv", "")
@@ -381,7 +384,7 @@ class WebController:
             await self._broadcast({"type": "waypoints_loaded", "count": 0, "error": str(e)})
 
     async def _handle_nav_start(self) -> None:
-        """处理导航开始指令。"""
+        """Handle navigation start command."""
         if self._nav_engine is None:
             return
         ok = self._nav_engine.start()
@@ -395,15 +398,30 @@ class WebController:
         else:
             await self._broadcast(self._nav_engine.get_status())
 
+    async def _handle_nav_start_force(self) -> None:
+        """Handle force-start navigation command (bypass GPS fix check)."""
+        if self._nav_engine is None:
+            return
+        ok = self._nav_engine.start(force=True)
+        if not ok:
+            status = self._nav_engine.get_status()
+            await self._broadcast({
+                "type":  "nav_status",
+                "error": "无法启动导航（无航点）",
+                **status,
+            })
+        else:
+            await self._broadcast(self._nav_engine.get_status())
+
     async def _handle_nav_stop(self) -> None:
-        """处理导航停止指令。"""
+        """Handle navigation stop command."""
         if self._nav_engine is None:
             return
         self._nav_engine.stop()
         await self._broadcast(self._nav_engine.get_status())
 
     async def _handle_nav_mode(self, msg: dict) -> None:
-        """切换导航算法模式（p2p / pure_pursuit）。"""
+        """Switch navigation algorithm mode (p2p / pure_pursuit)."""
         if self._nav_engine is None:
             return
         mode_str = msg.get("mode", "")
@@ -415,7 +433,7 @@ class WebController:
             logger.warning(f"WebSocket: 未知导航模式: {mode_str!r}")
 
     async def _handle_filter_mode(self, msg: dict) -> None:
-        """切换 GPS 滤波器模式（moving_avg / kalman）。"""
+        """Switch GPS filter mode (moving_avg / kalman)."""
         if self._nav_engine is None:
             return
         mode_str = msg.get("mode", "")
@@ -452,7 +470,7 @@ class WebController:
                 if dead:
                     async with self._clients_lock:
                         self._clients -= dead
-            # 导航引擎 IMU 回调（20 Hz 驱动控制循环）
+            # Navigation engine IMU callback (20 Hz drives control loop)
             if self._nav_engine is not None:
                 self._nav_engine.on_imu(data)
 
@@ -503,7 +521,7 @@ class WebController:
                 if dead:
                     async with self._clients_lock:
                         self._clients -= dead
-            # 导航引擎 RTK 回调（1 Hz 更新 GPS 滤波器）
+            # Navigation engine RTK callback (1 Hz updates GPS filter)
             if self._nav_engine is not None:
                 self._nav_engine.on_rtk(snap)
 
@@ -549,7 +567,7 @@ class WebController:
         self._last_heartbeat = time.time()
         self._start_serial_reader()  # start daemon thread to read firmware state reports
 
-        # 初始化导航引擎
+        # Initialize navigation engine
         self._nav_engine = NavigationEngine(
             send_velocity_fn=self._send_velocity,
             broadcast_fn=self._broadcast,

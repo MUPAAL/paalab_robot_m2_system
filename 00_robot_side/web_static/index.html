@@ -10,7 +10,7 @@
 
 <div id="app">
 
-  <!-- ── 全屏摇杆（底层 z-index:0）── -->
+  <!-- ── Fullscreen joystick (base layer z-index:0) ── -->
   <div id="joystick-zone">
     <span id="joystick-hint">TOUCH TO CONTROL</span>
     <!-- AUTO MODE overlay -->
@@ -20,10 +20,10 @@
     </div>
   </div>
 
-  <!-- 警告横幅（顶部栏下方，z-index:20）-->
+  <!-- Warning banner (below top bar, z-index:20) -->
   <div id="warn-banner">⚠ CONNECTION LOST — ROBOT STOPPED</div>
 
-  <!-- ── 顶部栏 ── -->
+  <!-- ── Top bar ── -->
   <div id="top-bar">
     <span class="title">FARMBOT</span>
     <span id="status-dot"></span>
@@ -36,7 +36,7 @@
     <span id="rec-filename">—</span>
   </div>
 
-  <!-- ── 左上 HUD：IMU + 罗盘 ── -->
+  <!-- ── Top-left HUD: IMU + Compass ── -->
   <div id="hud-left">
     <div class="hud-panel-title">ACCEL</div>
     <div class="hud-value"><span class="hud-label">X</span><span class="hud-num" id="acc-x">--</span></div>
@@ -77,7 +77,7 @@
     </div>
   </div>
 
-  <!-- ── 右上 HUD：RTK GPS ── -->
+  <!-- ── Top-right HUD: RTK GPS ── -->
   <div id="hud-right">
     <div id="rtk-header">
       <span id="rtk-title">RTK GPS</span>
@@ -112,7 +112,7 @@
     </div>
   </div>
 
-  <!-- ── 导航状态面板（居中顶部，仅导航时显示）── -->
+  <!-- ── Navigation status panel (top-center, visible only during navigation) ── -->
   <div id="nav-status-panel">
     <div id="nav-status-grid">
       <div class="nav-cell">
@@ -155,6 +155,7 @@
     <button class="nav-mode-btn active" id="btn-mavg"    title="Moving Average GPS Smoothing">M-AVG</button>
     <button class="nav-mode-btn"        id="btn-kalman"  title="Kalman Filter GPS+IMU Fusion">KALMAN</button>
     <button id="nav-auto-btn" class="nav-idle">▶ AUTO</button>
+    <button id="nav-force-btn" class="nav-mode-btn" title="Force start navigation even without GPS fix">FORCE</button>
   </div>
 
   <!-- Hidden Joy Data Element Used By JS Update Joy UI Not Displayed In The Interface-->
