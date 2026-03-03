@@ -43,6 +43,7 @@ from config import (
     CAM1_STREAM_PORT,
     CAM2_IP,
     CAM2_STREAM_PORT,
+    FRONT_CAM_IP,
     LOCAL_DISPLAY,
     MJPEG_QUALITY,
 )
@@ -209,24 +210,43 @@ def main() -> None:
     src_for_display: Optional[SimpleColorSource] = None
     active_ports: list[int] = []
 
-    if cam_sel in ("1", "both"):
+    if cam_sel == "both":
+        # FRONT_CAM_IP is always assigned to CAM1_STREAM_PORT (8080)
+        # The other camera (back) is assigned to CAM2_STREAM_PORT (8081)
+        front_ip = FRONT_CAM_IP
+        back_ip  = CAM1_IP if front_ip == CAM2_IP else CAM2_IP
+        logger.info(
+            f"CAM_SELECTION=both: front camera={front_ip}->:{CAM1_STREAM_PORT}, "
+            f"rear camera={back_ip}->:{CAM2_STREAM_PORT}"
+        )
+
+        src_front = SimpleColorSource(device_ip=front_ip)
+        srv_front = MJPEGServer(source=src_front, port=CAM1_STREAM_PORT)
+        servers.append((srv_front, src_front))
+        src_for_display = src_front
+        active_ports.append(CAM1_STREAM_PORT)
+
+        src_back = SimpleColorSource(device_ip=back_ip)
+        srv_back = MJPEGServer(source=src_back, port=CAM2_STREAM_PORT)
+        servers.append((srv_back, src_back))
+        active_ports.append(CAM2_STREAM_PORT)
+
+    elif cam_sel == "1":
         src1 = SimpleColorSource(device_ip=CAM1_IP)
         srv1 = MJPEGServer(source=src1, port=CAM1_STREAM_PORT)
         servers.append((srv1, src1))
         src_for_display = src1
         active_ports.append(CAM1_STREAM_PORT)
 
-    if cam_sel in ("2", "both"):
-        # "2" only → 复用 CAM1_STREAM_PORT 作为唯一端口
-        port2 = CAM2_STREAM_PORT if cam_sel == "both" else CAM1_STREAM_PORT
+    elif cam_sel == "2":
+        # "2" only -> reuse CAM1_STREAM_PORT as the single output port
         src2 = SimpleColorSource(device_ip=CAM2_IP)
-        srv2 = MJPEGServer(source=src2, port=port2)
+        srv2 = MJPEGServer(source=src2, port=CAM1_STREAM_PORT)
         servers.append((srv2, src2))
-        if src_for_display is None:
-            src_for_display = src2
-        active_ports.append(port2)
+        src_for_display = src2
+        active_ports.append(CAM1_STREAM_PORT)
 
-    if not servers:
+    else:
         logger.error(f"Invalid CAM_SELECTION value: '{cam_sel}', expected '1', '2', or 'both'")
         sys.exit(1)
 

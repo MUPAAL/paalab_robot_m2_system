@@ -101,6 +101,11 @@ class NavigationEngine:
         # Broadcast throttling
         self._broadcast_counter: int = 0
 
+        # Diagnostic log throttling (all timestamps in seconds since epoch)
+        self._last_uncal_warn_ts:  float = 0.0   # on_imu: compass not calibrated
+        self._last_diag_ts:        float = 0.0   # _control_step: filter/bearing not ready
+        self._last_status_log_ts:  float = 0.0   # _control_step: periodic NAV STATUS info
+
     # ── Public API ────────────────────────────────────────
     def load_waypoints(self, csv_text: str) -> int:
         """Load waypoint CSV text and return the number of loaded waypoints."""
@@ -123,16 +128,16 @@ class NavigationEngine:
         """
         with self._lock:
             if self._state == NavState.NAVIGATING:
-                logger.warning("NavigationEngine: 已在导航中，忽略重复 start()")
+                logger.warning("NavigationEngine: already navigating, ignoring duplicate start()")
                 return False
             if self._wp_mgr.current is None:
-                logger.warning("NavigationEngine: 无有效航点，无法启动")
+                logger.warning("NavigationEngine: no valid waypoints, cannot start")
                 return False
             if self._fix_quality < 1:
                 if force:
-                    logger.warning(f"NavigationEngine: GPS fix_quality=0，强制启动（force=True）")
+                    logger.warning("NavigationEngine: GPS fix_quality=0, forcing start (force=True)")
                 else:
-                    logger.warning(f"NavigationEngine: GPS fix_quality={self._fix_quality}，不足以导航")
+                    logger.warning(f"NavigationEngine: GPS fix_quality={self._fix_quality}, insufficient for navigation")
                     return False
 
             self._wp_mgr.reset()
@@ -145,8 +150,8 @@ class NavigationEngine:
             self._last_control_ts = time.time()
 
         logger.info(
-            f"NavigationEngine: 导航开始，模式={self._nav_mode.value}，"
-            f"滤波={self._filter_mode.value}，航点数={self._wp_mgr.progress[1]}"
+            f"NavigationEngine: navigation started, mode={self._nav_mode.value}, "
+            f"filter={self._filter_mode.value}, waypoints={self._wp_mgr.progress[1]}"
         )
         self._schedule_broadcast()
         return True
@@ -161,7 +166,7 @@ class NavigationEngine:
             self._pp_ctrl.reset()
 
         self._send_velocity(0.0, 0.0)
-        logger.info("NavigationEngine: 导航停止")
+        logger.info("NavigationEngine: navigation stopped")
         self._schedule_broadcast()
 
     def set_nav_mode(self, mode: NavMode) -> None:
@@ -169,12 +174,12 @@ class NavigationEngine:
             self._nav_mode = mode
             self._p2p_ctrl.reset()
             self._pp_ctrl.reset()
-        logger.info(f"NavigationEngine: 导航模式切换 → {mode.value}")
+        logger.info(f"NavigationEngine: navigation mode switched -> {mode.value}")
 
     def set_filter_mode(self, mode: FilterMode) -> None:
         with self._lock:
             self._filter_mode = mode
-        logger.info(f"NavigationEngine: 滤波器切换 → {mode.value}")
+        logger.info(f"NavigationEngine: filter switched -> {mode.value}")
 
     def get_status(self) -> dict:
         """Return the current navigation status dict (thread-safe)."""
@@ -221,6 +226,18 @@ class NavigationEngine:
             compass = imu_data.get("compass", {})
             calibrated = compass.get("calibrated", False)
             if not calibrated:
+                now_check = time.time()
+                with self._lock:
+                    if (self._state == NavState.NAVIGATING
+                            and now_check - self._last_uncal_warn_ts >= 5.0):
+                        self._last_uncal_warn_ts = now_check
+                        accuracy = compass.get("accuracy", 0)
+                        logger.warning(
+                            "NavigationEngine: navigating but compass accuracy is insufficient (accuracy=%d/3). "
+                            "Robot motion is stopped. You can set COMPASS_MIN_ACCURACY=0 to accept "
+                            "uncalibrated data, or complete figure-8 calibration and restart navigation.",
+                            accuracy,
+                        )
                 return
 
             bearing = compass.get("bearing", 0.0)
@@ -289,7 +306,7 @@ class NavigationEngine:
             if self._last_gps_ts > 0:
                 gps_age = now - self._last_gps_ts
                 if gps_age > NAV_GPS_TIMEOUT_S and not self._gps_warning_sent:
-                    logger.warning(f"NavigationEngine: GPS 超时 {gps_age:.1f}s，暂停导航")
+                    logger.warning(f"NavigationEngine: GPS timeout {gps_age:.1f}s, pausing navigation")
                     self._gps_warning_sent = True
                     self._send_velocity(0.0, 0.0)
                     self._schedule_broadcast_unsafe({"type": "nav_warning", "msg": "GPS timeout"})
@@ -300,17 +317,35 @@ class NavigationEngine:
             # Get filtered position
             if self._filter_mode == FilterMode.MOVING_AVG:
                 if not self._ma_filter.is_ready:
+                    if now - self._last_diag_ts >= 5.0:
+                        self._last_diag_ts = now
+                        logger.warning(
+                            "NavigationEngine: waiting for GPS filter readiness "
+                            "(MovingAvg window not full), navigation paused"
+                        )
                     return
                 pos = self._ma_filter.get_position()
             else:
                 if not self._kf_filter.is_ready:
+                    if now - self._last_diag_ts >= 5.0:
+                        self._last_diag_ts = now
+                        logger.warning(
+                            "NavigationEngine: waiting for GPS filter readiness "
+                            "(Kalman not initialized), navigation paused"
+                        )
                     return
                 pos = self._kf_filter.get_position()
 
             robot_lat, robot_lon = pos
 
             if self._robot_bearing is None:
-                return  # Compass not calibrated
+                if now - self._last_diag_ts >= 5.0:
+                    self._last_diag_ts = now
+                    logger.warning(
+                        "NavigationEngine: compass bearing is not set, navigation paused. "
+                        "Please verify IMU is connected or set COMPASS_MIN_ACCURACY=0"
+                    )
+                return
 
             wp = self._wp_mgr.current
             if wp is None:
@@ -330,7 +365,7 @@ class NavigationEngine:
                     # All waypoints completed
                     self._state = NavState.FINISHED
                     total = self._wp_mgr.progress[1]
-                    logger.info(f"NavigationEngine: 所有 {total} 个航点完成！")
+                    logger.info(f"NavigationEngine: all {total} waypoints completed!")
                     self._send_velocity(0.0, 0.0)
                     self._schedule_broadcast_unsafe({"type": "nav_complete", "total_wp": total})
                     self._schedule_broadcast_unsafe(self._get_status_unsafe())
@@ -357,7 +392,32 @@ class NavigationEngine:
             linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
             angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
 
+            # Capture status snapshot for periodic terminal log (every 5 s)
+            _status_snap = None
+            if now - self._last_status_log_ts >= 5.0:
+                self._last_status_log_ts = now
+                prog = self._wp_mgr.progress
+                target_b = bearing_to_target(robot_lat, robot_lon, wp.lat, wp.lon)
+                bearing_err = ((target_b - self._robot_bearing + 180) % 360) - 180
+                filt_name = (
+                    "MA(ready)" if self._filter_mode == FilterMode.MOVING_AVG
+                    else "Kalman(ready)"
+                )
+                _status_snap = (
+                    prog[0], prog[1], wp.lat, wp.lon,
+                    distance, bearing_err, linear, angular,
+                    filt_name, self._fix_quality,
+                )
+
         self._send_velocity(linear, angular)
+
+        if _status_snap is not None:
+            idx, total, wlat, wlon, dist, berr, lin, ang, filt_str, fq = _status_snap
+            logger.info(
+                "[NAV STATUS] Target: WP#%d/%d (%.6f,%.6f), Distance: %.1fm, "
+                "Bearing error: %+.1f°, Linear vel: %.2f, Angular vel: %.2f, Filter: %s, GPS quality: %d",
+                idx, total, wlat, wlon, dist, berr, lin, ang, filt_str, fq,
+            )
 
         # Broadcast status at 4 Hz
         self._broadcast_counter += 1

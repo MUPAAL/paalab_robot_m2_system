@@ -18,6 +18,8 @@ import os
 import threading
 import time
 
+from config import COMPASS_MIN_ACCURACY, COMPASS_OFFSET_DEG
+
 logger = logging.getLogger(__name__)
 
 # ── Module-level global IMU data (thread-safe) ───────────
@@ -126,8 +128,12 @@ class IMUReader(threading.Thread):
             except (AttributeError, TypeError, ValueError):
                 # Fallback: infer from all-zero quaternion check
                 accuracy = 0 if (w == 0.0 and xi == 0.0 and yj == 0.0 and zk == 0.0) else 3
-            calibrated = accuracy >= 2
-            bearing, cardinal = quaternion_to_compass(w, xi, yj, zk)  # Always compute; frontend uses accuracy to show calibration state
+            calibrated = accuracy >= COMPASS_MIN_ACCURACY
+            bearing, cardinal = quaternion_to_compass(w, xi, yj, zk)
+            # Apply static compass offset (manual north-alignment compensation)
+            bearing = (bearing + COMPASS_OFFSET_DEG) % 360.0
+            cardinals_list = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+            cardinal = cardinals_list[int((bearing + 22.5) / 45.0) % 8]
 
             with imu_lock:
                 imu_data = {

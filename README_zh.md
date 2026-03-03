@@ -167,6 +167,10 @@ web_controller.py
 自主导航期间摇杆自动禁用。浏览器实时显示航点进度、距目标距离、方位角和定位质量。
 罗盘 HUD 在任意校准级别（UNCAL / LOW / GOOD / PRECISE）下均实时显示方位角，精度标签同步更新。
 
+> **罗盘 UNCAL 解决方案**：若 BNO085 磁力计无法完成画8字校准（摄像头固定在机器人上时），设置 `COMPASS_MIN_ACCURACY=0` 可接受未校准的方位角数据。如果方位角存在已知固定偏差，可用 `COMPASS_OFFSET_DEG` 进行静态补偿。
+
+> **导航诊断日志**：导航过程中，终端每 5 秒输出一行 `[NAV STATUS]`，显示当前航点、距离、方位误差和发出的速度命令。若机器人静止不动，每 5 秒会输出 `WARNING` 说明原因（罗盘精度不足、GPS 滤波器预热中等）。
+
 ---
 
 ## 串口协议
@@ -284,6 +288,7 @@ pip install pynput opencv-python
 | `CAM2_IP`             | `10.95.76.11`              | 同左               | OAK-D PoE 相机 2 IP          |
 | `CAM1_STREAM_PORT`    | `8080`                     | 同左               | 相机 1 MJPEG 流端口          |
 | `CAM2_STREAM_PORT`    | `8081`                     | 同左               | 相机 2 MJPEG 流端口          |
+| `FRONT_CAM_IP`        | （= `CAM1_IP`）            | 同左               | 前置摄像头 IP；`CAM_SELECTION=both` 时始终分配到 8080 端口 |
 | `MJPEG_QUALITY`       | `80`                       | 同左               | JPEG 编码质量（1–100）       |
 | `LOCAL_DISPLAY`       | `0`（关）                  | 同左               | `1` 开启机器人端本地预览     |
 | `WEB_HTTP_PORT`       | `8888`                     | 同左               | Web 摇杆 HTTP 端口           |
@@ -304,6 +309,8 @@ pip install pynput opencv-python
 | `NAV_PID_KI`          | `0.01`                     | 同左               | 朝向 PID 积分增益            |
 | `NAV_PID_KD`          | `0.05`                     | 同左               | 朝向 PID 微分增益            |
 | `NAV_MA_WINDOW`       | `10`                       | 同左               | 移动均值 GPS 滤波器窗口大小  |
+| `COMPASS_MIN_ACCURACY`| `2`                        | 同左               | BNO085 磁力计精度阈值（0–3）。摄像头固定在机器人上无法做画8字校准时，设为 `0` 接受未校准数据 |
+| `COMPASS_OFFSET_DEG`  | `0.0`                      | 同左               | 静态罗盘偏置补偿（度）。朝北读取当前 bearing，设为 `−bearing` 做手动对齐 |
 
 ### 远程端（`01_remote_side/config.py`）
 
@@ -498,7 +505,10 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 日志格式：
 
 ```
-2025-01-01 12:00:00,000 [INFO] TCP server listening on 0.0.0.0:9000
-2025-01-01 12:00:01,500 [INFO] NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
-2025-01-01 12:00:15,200 [INFO] WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
+2025-01-01 12:00:00,000 [INFO]    TCP server listening on 0.0.0.0:9000
+2025-01-01 12:00:01,500 [INFO]    NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
+2025-01-01 12:00:02,100 [WARNING] NavigationEngine: 导航中但罗盘精度不足(accuracy=0/3)，机器人停止移动。可设置 COMPASS_MIN_ACCURACY=0 …
+2025-01-01 12:00:02,200 [WARNING] NavigationEngine: 等待GPS滤波器就绪(MovingAvg窗口未满)，导航暂停
+2025-01-01 12:00:06,300 [INFO]    [NAV STATUS] 目标: WP#1/3 (30.123450,120.987650), 距离: 3.2m, 方位误差: +12.3°, 线速: 0.35, 角速: 0.18, 滤波: MA(就绪), GPS质量: 4
+2025-01-01 12:00:15,200 [INFO]    WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
 ```

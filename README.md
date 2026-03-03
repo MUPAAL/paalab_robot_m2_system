@@ -164,6 +164,10 @@ Joystick is automatically disabled during autonomous navigation.
 The browser shows real-time progress: waypoint index, distance to target, bearing, and fix quality.
 The compass HUD displays live bearing at all calibration levels (UNCAL / LOW / GOOD / PRECISE); the accuracy label updates in real-time.
 
+> **Compass UNCAL workaround**: If the BNO085 compass cannot be calibrated (robot-mounted camera cannot rotate freely for figure-8 calibration), set `COMPASS_MIN_ACCURACY=0` to accept uncalibrated heading data. Use `COMPASS_OFFSET_DEG` to add a fixed offset if the raw bearing has a known bias.
+
+> **Navigation diagnostics**: While navigating, the terminal prints a `[NAV STATUS]` line every 5 seconds with current waypoint, distance, bearing error, and commanded velocities. If the robot is not moving, warning messages are emitted every 5 seconds indicating the reason (compass not ready, GPS filter warming up, etc.).
+
 ---
 
 ## Serial Protocol
@@ -277,6 +281,7 @@ pip install pynput opencv-python
 | `CAM2_IP`             | `10.95.76.11`              | same               | OAK-D PoE camera 2 IP              |
 | `CAM1_STREAM_PORT`    | `8080`                     | same               | Camera 1 MJPEG stream port         |
 | `CAM2_STREAM_PORT`    | `8081`                     | same               | Camera 2 MJPEG stream port         |
+| `FRONT_CAM_IP`        | (= `CAM1_IP`)              | same               | Front camera IP; always routed to port 8080 when `CAM_SELECTION=both` |
 | `MJPEG_QUALITY`       | `80`                       | same               | JPEG encoding quality (1–100)      |
 | `LOCAL_DISPLAY`       | `0` (off)                  | same               | Set `1` for local preview window   |
 | `WEB_HTTP_PORT`       | `8888`                     | same               | Web joystick HTTP port             |
@@ -297,6 +302,8 @@ pip install pynput opencv-python
 | `NAV_PID_KI`          | `0.01`                     | same               | Heading PID integral gain          |
 | `NAV_PID_KD`          | `0.05`                     | same               | Heading PID derivative gain        |
 | `NAV_MA_WINDOW`       | `10`                       | same               | Moving-average GPS filter window   |
+| `COMPASS_MIN_ACCURACY`| `2`                        | same               | BNO085 accuracy threshold 0–3. Set to `0` to accept uncalibrated data when the camera is robot-mounted and cannot rotate for figure-8 calibration |
+| `COMPASS_OFFSET_DEG`  | `0.0`                      | same               | Static compass offset in degrees. Point robot north, read current bearing, set to `−bearing` to compensate |
 
 ### Remote side (`01_remote_side/config.py`)
 
@@ -488,7 +495,10 @@ Workflow:
 Log format:
 
 ```
-2025-01-01 12:00:00,000 [INFO] TCP server listening on 0.0.0.0:9000
-2025-01-01 12:00:01,500 [INFO] NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
-2025-01-01 12:00:15,200 [INFO] WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
+2025-01-01 12:00:00,000 [INFO]    TCP server listening on 0.0.0.0:9000
+2025-01-01 12:00:01,500 [INFO]    NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
+2025-01-01 12:00:02,100 [WARNING] NavigationEngine: 导航中但罗盘精度不足(accuracy=0/3)，机器人停止移动。可设置 COMPASS_MIN_ACCURACY=0 …
+2025-01-01 12:00:02,200 [WARNING] NavigationEngine: 等待GPS滤波器就绪(MovingAvg窗口未满)，导航暂停
+2025-01-01 12:00:06,300 [INFO]    [NAV STATUS] 目标: WP#1/3 (30.123450,120.987650), 距离: 3.2m, 方位误差: +12.3°, 线速: 0.35, 角速: 0.18, 滤波: MA(就绪), GPS质量: 4
+2025-01-01 12:00:15,200 [INFO]    WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
 ```
