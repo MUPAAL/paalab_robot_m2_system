@@ -16,6 +16,7 @@ Environment variable quick reference:
   NAV_LOOKAHEAD_M, NAV_DECEL_RADIUS_M, NAV_ARRIVE_FRAMES, NAV_GPS_TIMEOUT_S
   NAV_PID_KP, NAV_PID_KI, NAV_PID_KD, NAV_MA_WINDOW
   COMPASS_MIN_ACCURACY, COMPASS_OFFSET_DEG
+  IMU_SOURCE, ESP32_IMU_PORT, ESP32_IMU_BAUD
 """
 
 import os
@@ -117,3 +118,14 @@ NAV_MA_WINDOW:      int   = int(os.environ.get("NAV_MA_WINDOW",        "10"))   
 #   for manual alignment.
 COMPASS_MIN_ACCURACY: int   = int(os.environ.get("COMPASS_MIN_ACCURACY",   "2"))
 COMPASS_OFFSET_DEG:   float = float(os.environ.get("COMPASS_OFFSET_DEG",   "0.0"))
+
+# ═══════════════════════════════════════════════════════
+# Sensors: IMU source selection
+# ═══════════════════════════════════════════════════════
+# IMU_SOURCE: "esp32" uses ESP32+BNO085 over serial UART (recommended for field use);
+#             "oakd"  uses OAK-D depthai BNO085 (legacy, requires depthai installed).
+# ESP32_IMU_PORT: serial port of the ESP32 IMU board.
+# ESP32_IMU_BAUD: baud rate (default 115200, matches ESP32 firmware).
+IMU_SOURCE:     str   = os.environ.get("IMU_SOURCE",     "esp32")
+ESP32_IMU_PORT: str   = os.environ.get("ESP32_IMU_PORT", "/dev/ttyUSB0")
+ESP32_IMU_BAUD: int   = int(os.environ.get("ESP32_IMU_BAUD", "115200"))

@@ -36,9 +36,13 @@ from config import (
     WATCHDOG_TIMEOUT,
     RTK_PORT, RTK_BAUD, RTK_ENABLED,
     DATA_LOG_DIR,
+    IMU_SOURCE, ESP32_IMU_PORT,
 )
 from sensors.rtk_reader import RTKReader
-from sensors.imu_reader import IMUReader, imu_lock, imu_data, imu_available
+if IMU_SOURCE == "esp32":
+    from sensors.esp32_imu_reader import ESP32IMUReader as IMUReader
+else:
+    from sensors.imu_reader import IMUReader, imu_lock, imu_data, imu_available  # type: ignore[assignment]
 from data_recorder import DataRecorder
 from navigation.nav_engine import NavigationEngine, NavMode, FilterMode
 
@@ -604,6 +608,10 @@ def main() -> None:
     logger.info(f"  Max vel   : linear={MAX_LINEAR_VEL} m/s, angular={MAX_ANGULAR_VEL} rad/s")
     logger.info(f"  Watchdog  : {WATCHDOG_TIMEOUT}s")
     logger.info(f"  RTK GPS   : {'enabled (' + RTK_PORT + ')' if RTK_ENABLED else 'disabled'}")
+    if IMU_SOURCE == "esp32":
+        logger.info(f"  IMU       : ESP32+BNO085 ({ESP32_IMU_PORT})")
+    else:
+        logger.info(f"  IMU       : OAK-D depthai")
     logger.info(f"  Data log  : {DATA_LOG_DIR}/")
     logger.info("=" * 50)
 
