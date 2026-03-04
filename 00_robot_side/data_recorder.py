@@ -4,7 +4,9 @@ Data Recorder — CSV writer for IMU + RTK + command data
 CSV columns:
   timestamp, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z,
   compass_bearing, lat, lon, alt, fix_quality, num_sats, hdop,
-  linear_cmd, angular_cmd
+  linear_cmd, angular_cmd,
+  odom_speed, odom_angrate,  -- actual measured speed/angular rate from Amiga TPDO1
+  amiga_soc                  -- battery state-of-charge (%) from Amiga TPDO1
 
 Usage:
     recorder = DataRecorder("data_log")
@@ -44,6 +46,8 @@ _CSV_HEADER = [
     "lat", "lon", "alt",
     "fix_quality", "num_sats", "hdop",
     "linear_cmd", "angular_cmd",
+    "odom_speed", "odom_angrate",  # actual measured speed from Amiga TPDO1
+    "amiga_soc",                   # battery state-of-charge (%) from Amiga TPDO1
 ]
 
 
@@ -110,6 +114,7 @@ class DataRecorder:
         rtk_snap: dict,
         linear: float,
         angular: float,
+        odom_snap: dict | None = None,  # optional odometry snapshot {v, w, state, soc, ts}
     ) -> None:
         """
         Write one row to the CSV.
@@ -123,6 +128,7 @@ class DataRecorder:
         accel = imu_snap.get("accel", {})
         gyro  = imu_snap.get("gyro",  {})
         comp  = imu_snap.get("compass", {})
+        odom  = odom_snap or {}
 
         row = [
             ts,
@@ -141,6 +147,9 @@ class DataRecorder:
             _fmt(rtk_snap.get("hdop"), 2),
             _fmt(linear, 4),
             _fmt(angular, 4),
+            _fmt(odom.get("v"),   4),
+            _fmt(odom.get("w"),   4),
+            odom.get("soc", ""),
         ]
 
         with self._lock:

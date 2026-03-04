@@ -75,12 +75,14 @@ function connect() {
         imu:              handleIMU,
         status:           handleStatus,
         rtk:              handleRTK,
+        odom:             handleOdom,
         record_status:    handleRecordStatus,
         state_status:     handleStateStatus,
         waypoints_loaded: handleWaypointsLoaded,
         nav_status:       handleNavStatus,
         nav_complete:     handleNavComplete,
         nav_warning:      handleNavWarning,
+        coverage_ready:   handleCoverageReady,
       };
       const handler = handlers[msg.type];
       if (handler) handler(msg);
@@ -127,6 +129,14 @@ function setStatus(online) {
     warn.classList.add('visible');
     btn.disabled = true;
   }
+}
+
+// ── Odometry HUD update ──────────────────────────────────────
+function handleOdom(msg) {
+  document.getElementById('odom-v').textContent = (msg.v !== null && msg.v !== undefined) ? msg.v.toFixed(3) : '--';
+  document.getElementById('odom-w').textContent = (msg.w !== null && msg.w !== undefined) ? msg.w.toFixed(3) : '--';
+  const socEl = document.getElementById('amiga-soc');
+  socEl.textContent = (msg.soc !== null && msg.soc !== undefined) ? msg.soc + '%' : '--%';
 }
 
 // ── IMU HUD update ──────────────────────────────────────────
@@ -279,6 +289,73 @@ function handleNavWarning(msg) {
   }, 5000);
 }
 
+// ── Coverage path planner ─────────────────────────────────────
+function handleCoverageReady(msg) {
+  const statusEl = document.getElementById('cov-status');
+  const genBtn   = document.getElementById('cov-gen-btn');
+  genBtn.disabled = false;
+  if (msg.error) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ ' + msg.error;
+  } else {
+    const count = msg.count || 0;
+    statusEl.style.color = count > 0 ? 'var(--green)' : 'var(--warn)';
+    statusEl.textContent = count > 0
+      ? `✓ ${count} waypoints loaded`
+      : '⚠ 0 waypoints generated — check boundary/spacing';
+    // Update waypoint count in bottom bar
+    const wpEl = document.getElementById('nav-wp-count');
+    wpEl.textContent = count + ' WP';
+    wpEl.style.color = count > 0 ? 'var(--green)' : 'var(--dim)';
+  }
+}
+
+function parseBoundaryText(text) {
+  const lines = text.trim().split('\n');
+  const pts = [];
+  for (const line of lines) {
+    const parts = line.trim().split(/[\s,]+/);
+    if (parts.length >= 2) {
+      const lat = parseFloat(parts[0]);
+      const lon = parseFloat(parts[1]);
+      if (!isNaN(lat) && !isNaN(lon)) pts.push([lat, lon]);
+    }
+  }
+  return pts;
+}
+
+function sendGenerateCoverage() {
+  const boundaryText = document.getElementById('cov-boundary').value;
+  const boundary     = parseBoundaryText(boundaryText);
+  const statusEl     = document.getElementById('cov-status');
+  const genBtn       = document.getElementById('cov-gen-btn');
+
+  if (boundary.length < 3) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ Need at least 3 boundary points';
+    return;
+  }
+
+  const rowSpacing   = parseFloat(document.getElementById('cov-spacing').value)   || 1.0;
+  const directionDeg = parseFloat(document.getElementById('cov-direction').value)  || 0.0;
+  const overlapPct   = parseFloat(document.getElementById('cov-overlap').value)    || 0.0;
+  const toleranceM   = parseFloat(document.getElementById('cov-tolerance').value)  || 1.0;
+
+  statusEl.style.color = 'var(--dim)';
+  statusEl.textContent = 'Generating...';
+  genBtn.disabled = true;
+
+  sendMsg({
+    type:          'generate_coverage',
+    boundary:      boundary,
+    row_spacing:   rowSpacing,
+    direction_deg: directionDeg,
+    overlap:       overlapPct / 100.0,
+    tolerance_m:   toleranceM,
+    max_speed:     0.5,
+  });
+}
+
 // ── Nav mode & filter toggle ─────────────────────────────────
 function setNavMode(mode) {
   navMode = mode;
@@ -414,6 +491,26 @@ window.addEventListener('load', () => {
   const forceBtn = document.getElementById('nav-force-btn');
   forceBtn.addEventListener('click', () => sendMsg({ type: 'nav_start_force' }));
   forceBtn.addEventListener('touchend', (e) => { e.preventDefault(); sendMsg({ type: 'nav_start_force' }); });
+
+  // Coverage planner modal
+  const covToggleBtn = document.getElementById('cov-toggle-btn');
+  const covModal     = document.getElementById('cov-modal');
+  const covGenBtn    = document.getElementById('cov-gen-btn');
+  const covCloseBtn  = document.getElementById('cov-close-btn');
+
+  function openCovModal()  { covModal.classList.add('visible'); }
+  function closeCovModal() {
+    covModal.classList.remove('visible');
+    document.getElementById('cov-status').textContent = '';
+    document.getElementById('cov-gen-btn').disabled = false;
+  }
+
+  covToggleBtn.addEventListener('click',    openCovModal);
+  covToggleBtn.addEventListener('touchend', (e) => { e.preventDefault(); openCovModal(); });
+  covCloseBtn.addEventListener('click',    closeCovModal);
+  covCloseBtn.addEventListener('touchend', (e) => { e.preventDefault(); closeCovModal(); });
+  covGenBtn.addEventListener('click',    sendGenerateCoverage);
+  covGenBtn.addEventListener('touchend', (e) => { e.preventDefault(); sendGenerateCoverage(); });
 
   // Start WebSocket
   connect();

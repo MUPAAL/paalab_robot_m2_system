@@ -188,6 +188,35 @@ class KalmanFilter:
         )
         return lat, lon
 
+    # ── 速度观测更新（里程计，~20 Hz）──────────────────────
+    def update_velocity(self, v_north: float, v_east: float) -> None:
+        """轮速里程计速度观测更新步骤（约 20 Hz）。
+
+        Amiga TPDO1 提供实测线速度，经 on_odometry() 旋转到 NED 后调用。
+        仅观测速度状态，不更新位置状态。
+
+        Args:
+            v_north : 北向速度（m/s）
+            v_east  : 东向速度（m/s）
+
+        状态向量：x = [Δlat_m, Δlon_m, vel_lat, vel_lon]
+        观测矩阵：H = [[0,0,1,0],[0,0,0,1]]（只观测速度）
+        """
+        if not self._initialized:
+            return
+
+        z = np.array([v_north, v_east])
+        H = np.array([[0, 0, 1, 0],
+                      [0, 0, 0, 1]], dtype=float)
+        # 里程计速度噪声：σ ≈ 0.22 m/s（实测偏差约 0.05 m²/s²）
+        R_vel = np.eye(2) * 0.05
+
+        y = z - H @ self._x
+        S = H @ self._P @ H.T + R_vel
+        K = self._P @ H.T @ np.linalg.inv(S)
+        self._x = self._x + K @ y
+        self._P = (np.eye(4) - K @ H) @ self._P
+
     def reset(self) -> None:
         self._initialized = False
         self._x = np.zeros(4)

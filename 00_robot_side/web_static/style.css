@@ -290,3 +290,110 @@ html, body {
 /* Hidden elements */
 #csv-file-input  { display: none; }
 #joy-data-hidden { display: none; }
+
+/* ── Coverage path planner modal ── */
+#cov-modal {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 30;
+  align-items: center;
+  justify-content: center;
+}
+#cov-modal.visible { display: flex; }
+
+#cov-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  min-width: 260px;
+  max-width: 92vw;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.cov-panel-title {
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 5px;
+}
+
+.cov-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.cov-label {
+  color: var(--dim);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+
+#cov-spacing, #cov-direction, #cov-overlap, #cov-tolerance {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  padding: 4px 6px;
+  width: 100%;
+}
+
+#cov-boundary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10px;
+  padding: 5px 6px;
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+}
+
+#cov-status {
+  color: var(--dim);
+  font-size: 10px;
+  text-align: center;
+  margin-bottom: 6px;
+  min-height: 14px;
+}
+
+#cov-gen-btn {
+  width: 100%;
+  padding: 7px;
+  background: rgba(0,212,255,0.12);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+#cov-gen-btn:hover    { background: rgba(0,212,255,0.22); }
+#cov-gen-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+#cov-close-btn {
+  width: 100%;
+  padding: 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--dim);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10px;
+  cursor: pointer;
+}
+#cov-close-btn:hover { border-color: var(--accent); color: var(--accent); }

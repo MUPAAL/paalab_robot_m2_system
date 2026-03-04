@@ -53,7 +53,15 @@ class HelloMainLoopApp:
             # Don't override a pending ACTIVE request
             if self.request_state != AmigaControlState.STATE_AUTO_ACTIVE:
                 self.request_state = AmigaControlState.STATE_AUTO_READY
-        # print(self.amiga_tpdo1, end="\r")
+        # Forward measured odometry + state + battery to host (~20 Hz, for odometry fusion and monitoring)
+        console.write(
+            "O:{:.3f},{:.3f},{:d},{:d}\n".format(
+                self.amiga_tpdo1.meas_speed,
+                self.amiga_tpdo1.meas_ang_rate,
+                int(self.amiga_tpdo1.state),
+                self.amiga_tpdo1.soc,
+            ).encode()
+        )
 
     def parse_wasd_cmd(self, char):
         if char == " ":

@@ -30,16 +30,19 @@ Robot side (00_robot_side/)
 └── web_controller.py → serial → Feather M4 CAN → CAN bus → Amiga Dashboard
                       ← IMU  (OAK-D BNO085, 20 Hz broadcast)
                       ← RTK  (Emlid RS+, 1 Hz broadcast)
+                      ← ODOM (Amiga TPDO1: speed, ang_rate, state, SOC — 20 Hz broadcast)
                       → CSV  (data_log/, manual start/stop via browser)
 
-QGIS (CSV waypoints)
-        │ upload via browser
+QGIS (CSV waypoints) or CoveragePlanner (auto-generated)
+        │ upload via browser  OR  generate via browser COV panel
         ▼
     NavigationEngine (inside web_controller.py)
-    ├── WaypointManager   — CSV waypoint sequence
-    ├── GPS filter        — MovingAverageFilter or KalmanFilter (IMU-aided)
+    ├── CoveragePlanner   — Boustrophedon row-by-row coverage path generator
+    ├── WaypointManager   — CSV waypoint sequence + adaptive arrival tolerance
+    ├── GPS filter        — MovingAverageFilter or KalmanFilter (IMU+odometry-aided)
     ├── Controller        — P2PController or PurePursuitController
     └── 20 Hz control loop → V commands → serial → Feather M4 CAN
+                         ← O: odometry feedback (meas_speed, meas_ang_rate, state, SOC @ ~20 Hz)
 ```
 
 ---
@@ -54,20 +57,23 @@ m2_system/
 │   │   ├── serial_writer.py        # Thread-safe serial wrapper with command whitelist
 │   │   └── watchdog.py             # Watchdog timer — triggers emergency stop on timeout
 │   ├── sensors/                    # Sensor layer
-│   │   ├── imu_reader.py           # IMUReader daemon thread + quaternion_to_compass
+│   │   ├── imu_reader.py           # IMUReader daemon thread + quaternion_to_compass (OAK-D)
+│   │   ├── esp32_imu_reader.py     # ESP32IMUReader — BNO085 via serial "roll,pitch,yaw,acc\n"
 │   │   └── rtk_reader.py           # RTKReader daemon thread — NMEA GGA/RMC (Emlid RS+)
 │   ├── navigation/                 # Navigation algorithm layer
 │   │   ├── geo_utils.py            # Pure functions: Haversine, bearing, normalize_angle, projection
 │   │   ├── waypoint.py             # Waypoint dataclass + WaypointManager (adaptive tolerance)
-│   │   ├── gps_filter.py           # MovingAverageFilter + KalmanFilter (4D, IMU-aided)
+│   │   ├── gps_filter.py           # MovingAverageFilter + KalmanFilter (4D, IMU+odom-aided)
 │   │   ├── controller.py           # PIDController, P2PController, PurePursuitController
-│   │   └── nav_engine.py           # NavigationEngine state machine (NavState/NavMode/FilterMode)
+│   │   ├── nav_engine.py           # NavigationEngine state machine (NavState/NavMode/FilterMode)
+│   │   ├── coverage_planner.py     # CoveragePlanner — Boustrophedon row coverage path generator
+│   │   └── field_boundary.py       # Field boundary tools: CSV extraction, convex hull, manual input
 │   ├── camera/                     # Video layer
 │   │   ├── frame_source.py         # FrameSource ABC + SimpleColorSource (OAK-D)
 │   │   └── camera_streamer.py      # MJPEGServer: streams any FrameSource over HTTP
 │   ├── robot_receiver.py           # TCP server + watchdog + serial forwarding
 │   ├── local_controller.py         # Local keyboard → serial (no TCP required)
-│   ├── web_controller.py           # Web joystick + autonomous nav: HTTP :8888 + WS :8889
+│   ├── web_controller.py           # Web joystick + autonomous nav + coverage planner: HTTP :8888 + WS :8889
 │   ├── data_recorder.py            # DataRecorder — IMU+RTK+cmd CSV writer
 │   ├── web_static/
 │   │   ├── index.html              # Single-page HUD: joystick + speed + compass + IMU + RTK + NAV
@@ -83,7 +89,7 @@ m2_system/
 │   ├── main.py                     # One-shot launcher: sender (daemon) + viewer (main thread)
 │   └── log/
 ├── CIRCUITPY/                      # Feather M4 CAN firmware (CircuitPython)
-│   ├── code.py                     # Parses serial commands (WASD + V velocity) → CAN frames
+│   ├── code.py                     # Parses serial (WASD + V velocity); outputs O: odometry + S: state
 │   └── lib/farm_ng/                # farm-ng Amiga protocol library
 ├── CLAUDE.md
 ├── README.md                       # This file (English)
@@ -168,6 +174,39 @@ The compass HUD displays live bearing at all calibration levels (UNCAL / LOW / G
 
 > **Navigation diagnostics**: While navigating, the terminal prints a `[NAV STATUS]` line every 5 seconds with current waypoint, distance, bearing error, and commanded velocities. If the robot is not moving, warning messages are emitted every 5 seconds indicating the reason (compass not ready, GPS filter warming up, etc.).
 
+### Mode F — Coverage path planning (Boustrophedon)
+
+Automatically generate a lawnmower-style coverage path from a field boundary polygon, without manually placing waypoints in QGIS.
+
+```
+Browser COV panel
+  ├── boundary: [[lat,lon], …]   (enter corner coordinates or extract from recorded CSV)
+  ├── row_spacing: 1.0 m
+  ├── direction_deg: 0           (0 = N-S rows, 90 = E-W rows)
+  └── overlap: 0 %
+          │ WebSocket: generate_coverage
+          ▼
+    CoveragePlanner (Boustrophedon algorithm)
+      1. Project GPS boundary → local ENU plane (centroid as origin)
+      2. Rotate to scan frame: x' = travel direction, y' = row spacing direction
+      3. Clip scan lines (y' = const) against the polygon
+      4. Connect endpoints in S-shape (alternating direction per row)
+      5. Back-project scan frame → ENU → WGS-84
+          │ auto-load into NavigationEngine
+          ▼
+    WaypointManager → 20 Hz control loop → serial → Feather M4 CAN
+```
+
+**Coverage workflow:**
+
+1. On the browser, tap the **COV** button in the bottom bar
+2. Enter field boundary coordinates (one `lat,lon` per line, at least 3 points)
+3. Set row spacing, travel direction, and overlap percentage
+4. Tap **⚡ GENERATE PATH** — waypoints are loaded automatically
+5. Confirm the waypoint count, then tap **▶ AUTO** to start navigation
+
+> Alternatively, use `field_boundary.py` to extract a convex hull from a previously recorded `data_log/*.csv` file and pass it to `CoveragePlanner` programmatically.
+
 ---
 
 ## Serial Protocol
@@ -191,6 +230,33 @@ After receiving `\r`, the Feather M4 replies with one of:
 S:ACTIVE\n   — request_state set to AUTO_ACTIVE
 S:READY\n    — request_state set to AUTO_READY
 ```
+
+Also sent once at boot so the host always knows the initial state.
+
+### O command — odometry feedback (firmware → host, ~20 Hz)
+
+The Feather M4 broadcasts measured wheel speed, control state, and battery SOC from each Amiga TPDO1 frame:
+
+```
+Format:  "O:{meas_speed:.3f},{meas_ang_rate:.3f},{state_int},{soc}\n"
+Example: "O:0.253,-0.012,3,85\n"   →  linear 0.253 m/s, angular -0.012 rad/s, AUTO_ACTIVE (3), battery 85%
+         "O:0.000,0.000,1,72\n"    →  robot stationary, AUTO_READY (1), battery 72%
+```
+
+`web_controller.py` parses `O:` lines in the serial reader thread (backward-compatible: 2-field format also accepted).
+It stores the snapshot in `_last_odom` and:
+- Calls `NavigationEngine.on_odometry(v, w)` — In **Kalman** filter mode, measured velocity is rotated to NED and used as a velocity observation to tighten the Kalman state, reducing GPS drift between fixes.
+- Broadcasts `{"type": "odom", v, w, state, soc, ts}` to all browser clients at 20 Hz.
+- Writes `odom_speed`, `odom_angrate`, and `amiga_soc` columns to every CSV recording row.
+
+**AmigaControlState values** (from `CIRCUITPY/packet.py`):
+
+| Integer | State name              | Meaning                    |
+|---------|-------------------------|----------------------------|
+| 0       | `STATE_STOPPED`         | Firmware stopped           |
+| 1       | `STATE_AUTO_READY`      | Ready to activate          |
+| 2       | `STATE_AUTO_ACTIVE`     | Actively executing commands|
+| 3–7     | other states            | Error / transition states  |
 
 ### V command (new, absolute velocity)
 
@@ -221,6 +287,7 @@ Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are act
 | `nav_stop`          | —                                               | Stop autonomous navigation           |
 | `nav_mode`          | `{mode: "p2p" \| "pure_pursuit"}`              | Switch navigation algorithm          |
 | `filter_mode`       | `{mode: "moving_avg" \| "kalman"}`             | Switch GPS filter                    |
+| `generate_coverage` | `{boundary:[[lat,lon],…], row_spacing, direction_deg, overlap, tolerance_m, max_speed}` | Generate and load a Boustrophedon coverage path |
 
 ### Server → Client
 
@@ -228,6 +295,7 @@ Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are act
 |--------------------|-----------------------------------------------------------------|-----------------------------------|
 | `imu`              | `accel, gyro, compass`                                          | 20 Hz IMU broadcast               |
 | `rtk`              | `lat, lon, alt, fix_quality, num_sats, hdop`                   | 1 Hz RTK GPS broadcast            |
+| `odom`             | `{v, w, state, soc, ts}`                                        | 20 Hz odometry broadcast: actual wheel speed (m/s), angular rate (rad/s), AmigaControlState integer, battery SOC (%) |
 | `state_status`     | `{active: bool}`                                                | Firmware AUTO state change        |
 | `record_status`    | `{recording, filename}`                                         | CSV recording state change        |
 | `status`           | `{serial_ok, imu_ok, rtk_ok, recording}`                       | 2 Hz system health                |
@@ -235,6 +303,7 @@ Values are clamped to `[-1.0, 1.0]` on the firmware side. Both protocols are act
 | `nav_status`       | `{state, progress:[i,n], distance_m, target_bearing, nav_mode, filter_mode, tolerance_m}` | ~4 Hz navigation status |
 | `nav_complete`     | `{total_wp: N}`                                                 | All waypoints reached             |
 | `nav_warning`      | `{msg: "GPS timeout"}`                                          | Navigation paused due to GPS loss |
+| `coverage_ready`   | `{count: N}` or `{count:0, error:"…"}`                         | Coverage path generated and loaded |
 
 ---
 
@@ -289,6 +358,9 @@ pip install pynput opencv-python
 | `MAX_LINEAR_VEL`      | `1.0` m/s                  | same               | Maximum linear velocity            |
 | `MAX_ANGULAR_VEL`     | `1.0` rad/s                | same               | Maximum angular velocity           |
 | `COORD_SYSTEM`        | `NED`                      | same               | IMU coordinate frame: `NED` or `ENU` |
+| `IMU_SOURCE`          | `esp32`                    | same               | IMU backend: `esp32` (BNO085 via serial) or `oakd` (OAK-D depthai) |
+| `ESP32_IMU_PORT`      | `/dev/ttyUSB0`             | same               | ESP32 serial port (when `IMU_SOURCE=esp32`) |
+| `ESP32_IMU_BAUD`      | `115200`                   | same               | ESP32 serial baud rate             |
 | `RTK_PORT`            | `/dev/cu.usbmodem2403`     | same               | Emlid RS+ serial port              |
 | `RTK_BAUD`            | `9600`                     | same               | RTK GPS baud rate                  |
 | `RTK_TIMEOUT`         | `1.0` s                    | same               | Serial readline timeout            |
@@ -455,6 +527,7 @@ Workflow:
 3. Send CAN RPDO1 frame at 20 Hz with current `cmd_speed` + `cmd_ang_rate`.
 4. Receive TPDO1 status frames from the Amiga Dashboard to sync control state.
 5. **Reply to `\r`** with `S:ACTIVE\n` or `S:READY\n` so the host always knows the actual AUTO state.
+6. **Broadcast `O:` odometry** on every received TPDO1 frame (~20 Hz): `O:{meas_speed:.3f},{meas_ang_rate:.3f},{state_int},{soc}\n` — measured wheel velocities, AmigaControlState integer, and battery SOC forwarded to the host for Kalman filter velocity updates, real-time HUD display, and CSV recording.
 
 ---
 
@@ -496,9 +569,12 @@ Log format:
 
 ```
 2025-01-01 12:00:00,000 [INFO]    TCP server listening on 0.0.0.0:9000
-2025-01-01 12:00:01,500 [INFO]    NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
-2025-01-01 12:00:02,100 [WARNING] NavigationEngine: 导航中但罗盘精度不足(accuracy=0/3)，机器人停止移动。可设置 COMPASS_MIN_ACCURACY=0 …
-2025-01-01 12:00:02,200 [WARNING] NavigationEngine: 等待GPS滤波器就绪(MovingAvg窗口未满)，导航暂停
-2025-01-01 12:00:06,300 [INFO]    [NAV STATUS] 目标: WP#1/3 (30.123450,120.987650), 距离: 3.2m, 方位误差: +12.3°, 线速: 0.35, 角速: 0.18, 滤波: MA(就绪), GPS质量: 4
-2025-01-01 12:00:15,200 [INFO]    WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
+2025-01-01 12:00:01,500 [INFO]    NavigationEngine: navigation started, mode=p2p, filter=moving_avg, waypoints=3
+2025-01-01 12:00:02,100 [WARNING] NavigationEngine: navigating but compass accuracy is insufficient (accuracy=0/3). Robot motion stopped. Set COMPASS_MIN_ACCURACY=0 to accept uncalibrated data.
+2025-01-01 12:00:02,200 [WARNING] NavigationEngine: waiting for GPS filter readiness (MovingAvg window not full), navigation paused
+2025-01-01 12:00:06,300 [INFO]    [NAV STATUS] Target: WP#1/3 (30.123450,120.987650), Distance: 3.2m, Bearing error: +12.3°, Linear vel: 0.35, Angular vel: 0.18, Filter: MA(ready), GPS quality: 4
+2025-01-01 12:00:15,200 [INFO]    WaypointManager: arrived at waypoint 0 (dist=0.48m, tol=0.50m)
+2025-01-01 12:00:15,300 [INFO]    CoveragePlanner: generated 48 waypoints, row_spacing=1.00m, overlap=0%, direction=0°
+2025-01-01 12:00:16,000 [INFO]    SerialReader: firmware state -> ACTIVE
+2025-01-01 12:00:16,100 [INFO]    KalmanFilter: initialized at origin (30.123450, 120.987650)
 ```

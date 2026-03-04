@@ -295,6 +295,33 @@ class NavigationEngine:
         except Exception as e:
             logger.error(f"NavigationEngine.on_rtk: {e}")
 
+    def on_odometry(self, v_linear: float, v_angular: float) -> None:
+        """Amiga TPDO1 里程计回调（约 20 Hz）。
+
+        将机体坐标系线速度旋转到 NED 坐标系，作为速度观测传给卡尔曼滤波器，
+        收紧速度状态估计，减少 GPS 漂移。
+
+        Args:
+            v_linear  : 实测线速度（m/s），正值前进
+            v_angular : 实测角速度（rad/s），左转为正
+        """
+        try:
+            with self._lock:
+                if self._filter_mode != FilterMode.KALMAN:
+                    return  # MA 滤波器无速度状态，跳过
+                if not self._kf_filter.is_ready:
+                    return  # 卡尔曼尚未初始化
+                bearing = self._robot_bearing
+                if bearing is None:
+                    return  # 无航向无法旋转到 NED
+
+                bearing_rad = math.radians(bearing)
+                v_north = v_linear * math.cos(bearing_rad)
+                v_east  = v_linear * math.sin(bearing_rad)
+                self._kf_filter.update_velocity(v_north, v_east)
+        except Exception as e:
+            logger.error(f"NavigationEngine.on_odometry: {e}")
+
     # ── Control step (internal, every 50 ms) ─────────────
     def _control_step(self, now: float) -> None:
         """Core control loop, called by on_imu at about 20 Hz."""

@@ -28,16 +28,19 @@
   └── web_controller.py → 串口 → Feather M4 CAN → CAN 总线 → Amiga Dashboard
                         ← IMU  OAK-D BNO085（20 Hz 广播）
                         ← RTK  Emlid RS+（1 Hz 广播）
+                        ← ODOM Amiga TPDO1（实测速度/角速度/控制状态/电量，20 Hz 广播）
                         → CSV  data_log/（浏览器手动 REC/STOP）
 
-QGIS（CSV 航点）
-        │ 通过浏览器上传
+QGIS（CSV 航点）或 CoveragePlanner（自动生成覆盖路径）
+        │ 通过浏览器上传  或  通过浏览器 COV 面板生成
         ▼
     NavigationEngine（位于 web_controller.py 内）
-    ├── WaypointManager   — CSV 航点序列
-    ├── GPS 滤波器        — MovingAverageFilter 或 KalmanFilter（IMU 辅助）
+    ├── CoveragePlanner   — Boustrophedon 蛇形覆盖路径生成器
+    ├── WaypointManager   — CSV 航点序列 + 自适应到达容忍半径
+    ├── GPS 滤波器        — MovingAverageFilter 或 KalmanFilter（IMU + 里程计辅助）
     ├── 控制器            — P2PController 或 PurePursuitController
     └── 20 Hz 控制循环 → V 命令 → 串口 → Feather M4 CAN
+                         ← O: 里程计回报（meas_speed, meas_ang_rate, state, SOC，约 20 Hz）
 ```
 
 ---
@@ -52,20 +55,23 @@ m2_system/
 │   │   ├── serial_writer.py        # 线程安全串口封装，命令白名单过滤
 │   │   └── watchdog.py             # 看门狗定时器，超时自动急停
 │   ├── sensors/                    # 传感器层
-│   │   ├── imu_reader.py           # IMUReader 守护线程 + quaternion_to_compass
+│   │   ├── imu_reader.py           # IMUReader 守护线程 + quaternion_to_compass（OAK-D）
+│   │   ├── esp32_imu_reader.py     # ESP32IMUReader — BNO085 串口 "roll,pitch,yaw,acc\n"
 │   │   └── rtk_reader.py           # RTKReader 守护线程 — NMEA GGA/RMC 解析（Emlid RS+）
 │   ├── navigation/                 # 导航算法层
 │   │   ├── geo_utils.py            # 纯函数：Haversine、方位角、normalize_angle、投影
 │   │   ├── waypoint.py             # Waypoint 数据类 + WaypointManager（自适应容忍半径）
-│   │   ├── gps_filter.py           # MovingAverageFilter + KalmanFilter（4D，IMU 辅助）
+│   │   ├── gps_filter.py           # MovingAverageFilter + KalmanFilter（4D，IMU+里程计辅助）
 │   │   ├── controller.py           # PIDController、P2PController、PurePursuitController
-│   │   └── nav_engine.py           # NavigationEngine 状态机（NavState/NavMode/FilterMode）
+│   │   ├── nav_engine.py           # NavigationEngine 状态机（NavState/NavMode/FilterMode）
+│   │   ├── coverage_planner.py     # CoveragePlanner — Boustrophedon 蛇形覆盖路径生成器
+│   │   └── field_boundary.py       # 边界提取工具：CSV 轨迹凸包、手动输入
 │   ├── camera/                     # 视频层
 │   │   ├── frame_source.py         # FrameSource ABC + SimpleColorSource（OAK-D）
 │   │   └── camera_streamer.py      # MJPEGServer：将 FrameSource 推流为 HTTP MJPEG
 │   ├── robot_receiver.py           # TCP 服务端 + 看门狗 + 串口转发
 │   ├── local_controller.py         # 本地键盘直连串口（无需 TCP）
-│   ├── web_controller.py           # Web 摇杆 + 自主导航：HTTP :8888 + WS :8889
+│   ├── web_controller.py           # Web 摇杆 + 自主导航 + 覆盖规划：HTTP :8888 + WS :8889
 │   ├── data_recorder.py            # DataRecorder — IMU+RTK+指令 CSV 写入
 │   ├── web_static/
 │   │   ├── index.html              # 单页 HUD（摇杆 + 速度滑块 + 罗盘 + IMU + RTK + NAV）
@@ -81,7 +87,7 @@ m2_system/
 │   ├── main.py                     # 一键启动：sender（后台线程）+ viewer（主线程）
 │   └── log/
 ├── CIRCUITPY/                      # Feather M4 CAN 固件（CircuitPython）
-│   ├── code.py                     # 解析串口命令（WASD + V 速度命令）→ CAN 帧
+│   ├── code.py                     # 解析串口（WASD + V 速度命令）；输出 O: 里程计 + S: 状态
 │   └── lib/farm_ng/                # farm-ng Amiga 协议库
 ├── CLAUDE.md
 ├── README.md                       # 英文文档
@@ -171,6 +177,39 @@ web_controller.py
 
 > **导航诊断日志**：导航过程中，终端每 5 秒输出一行 `[NAV STATUS]`，显示当前航点、距离、方位误差和发出的速度命令。若机器人静止不动，每 5 秒会输出 `WARNING` 说明原因（罗盘精度不足、GPS 滤波器预热中等）。
 
+### 模式 F：覆盖路径规划（Boustrophedon 蛇形）
+
+自动生成"割草机"式往返覆盖路径，无需在 QGIS 中手动放置航点。
+
+```
+浏览器 COV 面板
+  ├── boundary: [[lat,lon], …]  （输入田地角点坐标，或从录制 CSV 提取凸包）
+  ├── row_spacing: 1.0 m        （行间距）
+  ├── direction_deg: 0          （0 = N-S 行，90 = E-W 行）
+  └── overlap: 0 %              （行重叠率）
+          │ WebSocket: generate_coverage
+          ▼
+    CoveragePlanner（Boustrophedon 算法）
+      1. 将 GPS 边界投影到本地 ENU 平面（以重心为原点）
+      2. 旋转到扫描坐标系（x' = 行进方向，y' = 行间距方向）
+      3. 扫描线 y' = const 与多边形求交
+      4. S 形连接各行端点（逐行翻转方向）
+      5. 反投影回 WGS-84 经纬度
+          │ 自动加载到 NavigationEngine
+          ▼
+    WaypointManager → 20 Hz 控制循环 → 串口 → Feather M4 CAN
+```
+
+**使用流程：**
+
+1. 点击底栏 **COV** 按钮，打开覆盖路径规划对话框
+2. 逐行输入田地边界坐标（格式：`lat,lon`，至少 3 个顶点）
+3. 设置行间距、行进方向和重叠率
+4. 点击 **⚡ GENERATE PATH** — 航点自动加载到导航引擎
+5. 确认航点数量后，点击 **▶ AUTO** 开始执行
+
+> 也可在代码中使用 `field_boundary.py` 从录制的 `data_log/*.csv` 提取凸包，再传给 `CoveragePlanner` 生成路径。
+
 ---
 
 ## 串口协议
@@ -198,6 +237,31 @@ S:READY\n    — request_state 已设为 AUTO_READY
 固件启动时也会主动发送一次 `S:READY\n`，供上位机同步初始状态。
 `web_controller.py` 通过独立的 `SerialReader` 守护线程解析这些回报行，
 并向所有已连接的浏览器客户端广播 `state_status` WebSocket 消息。
+
+### O 命令 — 里程计回报（固件 → 上位机，约 20 Hz）
+
+Feather M4 在每次收到 Amiga TPDO1 帧时广播实测轮速、控制状态和电池电量：
+
+```
+格式：  "O:{meas_speed:.3f},{meas_ang_rate:.3f},{state_int},{soc}\n"
+示例：  "O:0.253,-0.012,3,85\n"   →  线速 0.253 m/s，角速 -0.012 rad/s，AUTO_ACTIVE(3)，电量 85%
+        "O:0.000,0.000,1,72\n"    →  静止，AUTO_READY(1)，电量 72%
+```
+
+`web_controller.py` 在 SerialReader 线程中解析 `O:` 行（向后兼容：2 字段旧格式也可正常接收）。
+解析结果存入 `_last_odom` 后：
+- 调用 `NavigationEngine.on_odometry(v, w)` — 启用 **Kalman** 滤波器时，实测速度旋转到 NED 坐标系作为速度观测，抑制两次 GPS 更新之间的漂移。
+- 以 20 Hz 广播 `{"type": "odom", v, w, state, soc, ts}` 到所有浏览器客户端，更新 HUD 的 **ODOM** 面板（SPD / ROT / BAT）。
+- 向每行 CSV 记录中写入 `odom_speed`、`odom_angrate`、`amiga_soc` 三列。
+
+**AmigaControlState 枚举值**（来自 `CIRCUITPY/packet.py`）：
+
+| 整数值 | 状态名                  | 含义                     |
+|--------|-------------------------|--------------------------|
+| 0      | `STATE_STOPPED`         | 固件已停止               |
+| 1      | `STATE_AUTO_READY`      | 待激活                   |
+| 2      | `STATE_AUTO_ACTIVE`     | 正在执行指令             |
+| 3–7    | 其他状态                | 错误 / 过渡状态          |
 
 ### V 命令（新增，绝对速度）
 
@@ -228,6 +292,7 @@ S:READY\n    — request_state 已设为 AUTO_READY
 | `nav_stop`          | —                                                   | 停止自主导航                   |
 | `nav_mode`          | `{mode: "p2p" \| "pure_pursuit"}`                  | 切换导航算法                   |
 | `filter_mode`       | `{mode: "moving_avg" \| "kalman"}`                 | 切换 GPS 滤波器                |
+| `generate_coverage` | `{boundary:[[lat,lon],…], row_spacing, direction_deg, overlap, tolerance_m, max_speed}` | 生成并加载 Boustrophedon 覆盖路径 |
 
 ### 服务端 → 客户端
 
@@ -235,6 +300,7 @@ S:READY\n    — request_state 已设为 AUTO_READY
 |--------------------|---------------------------------------------------------------------------------|--------------------------|
 | `imu`              | `accel, gyro, compass`                                                          | 20 Hz IMU 广播           |
 | `rtk`              | `lat, lon, alt, fix_quality, num_sats, hdop`                                   | 1 Hz RTK GPS 广播        |
+| `odom`             | `{v, w, state, soc, ts}`                                                        | 20 Hz 里程计广播：实测线速度 (m/s)、角速度 (rad/s)、AmigaControlState 枚举值、电池电量 (%) |
 | `state_status`     | `{active: bool}`                                                                | 固件 AUTO 状态变更       |
 | `record_status`    | `{recording, filename}`                                                         | CSV 录制状态变更         |
 | `status`           | `{serial_ok, imu_ok, rtk_ok, recording}`                                       | 2 Hz 系统健康状态        |
@@ -242,6 +308,7 @@ S:READY\n    — request_state 已设为 AUTO_READY
 | `nav_status`       | `{state, progress:[i,n], distance_m, target_bearing, nav_mode, filter_mode, tolerance_m}` | ~4 Hz 导航状态  |
 | `nav_complete`     | `{total_wp: N}`                                                                 | 全部航点到达             |
 | `nav_warning`      | `{msg: "GPS timeout"}`                                                          | GPS 丢失，导航暂停       |
+| `coverage_ready`   | `{count: N}` 或 `{count:0, error:"…"}`                                         | 覆盖路径已生成并加载     |
 
 ---
 
@@ -296,6 +363,9 @@ pip install pynput opencv-python
 | `MAX_LINEAR_VEL`      | `1.0` m/s                  | 同左               | 最大线速度                   |
 | `MAX_ANGULAR_VEL`     | `1.0` rad/s                | 同左               | 最大角速度                   |
 | `COORD_SYSTEM`        | `NED`                      | 同左               | IMU 坐标系：`NED`（x=北）或 `ENU`（x=东） |
+| `IMU_SOURCE`          | `esp32`                    | 同左               | IMU 后端：`esp32`（BNO085 串口）或 `oakd`（OAK-D depthai） |
+| `ESP32_IMU_PORT`      | `/dev/ttyUSB0`             | 同左               | ESP32 串口路径（`IMU_SOURCE=esp32` 时有效） |
+| `ESP32_IMU_BAUD`      | `115200`                   | 同左               | ESP32 串口波特率             |
 | `RTK_PORT`            | `/dev/cu.usbmodem2403`     | 同左               | Emlid RS+ 串口路径           |
 | `RTK_BAUD`            | `9600`                     | 同左               | RTK GPS 波特率               |
 | `RTK_TIMEOUT`         | `1.0` 秒                   | 同左               | 串口 readline 超时时间       |
@@ -465,6 +535,7 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 3. 以 20 Hz 发送 CAN RPDO1 帧，携带当前 `cmd_speed` + `cmd_ang_rate`
 4. 接收 Amiga Dashboard 的 TPDO1 状态帧，同步控制状态
 5. **响应 `\r`**：回报 `S:ACTIVE\n` 或 `S:READY\n`，让上位机始终获知真实 AUTO 状态；启动时发送一次 `S:READY\n` 以完成初始同步
+6. **广播 `O:` 里程计**：每收到一次 TPDO1 帧，输出 `O:{meas_speed:.3f},{meas_ang_rate:.3f},{state_int},{soc}\n`（约 20 Hz），将实测轮速、控制状态枚举值和电池电量转发给上位机，用于卡尔曼滤波速度更新、HUD 实时显示和 CSV 录制
 
 ---
 
@@ -506,9 +577,13 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 
 ```
 2025-01-01 12:00:00,000 [INFO]    TCP server listening on 0.0.0.0:9000
-2025-01-01 12:00:01,500 [INFO]    NavigationEngine: 导航开始，模式=p2p，滤波=moving_avg，航点数=3
-2025-01-01 12:00:02,100 [WARNING] NavigationEngine: 导航中但罗盘精度不足(accuracy=0/3)，机器人停止移动。可设置 COMPASS_MIN_ACCURACY=0 …
-2025-01-01 12:00:02,200 [WARNING] NavigationEngine: 等待GPS滤波器就绪(MovingAvg窗口未满)，导航暂停
-2025-01-01 12:00:06,300 [INFO]    [NAV STATUS] 目标: WP#1/3 (30.123450,120.987650), 距离: 3.2m, 方位误差: +12.3°, 线速: 0.35, 角速: 0.18, 滤波: MA(就绪), GPS质量: 4
-2025-01-01 12:00:15,200 [INFO]    WaypointManager: 到达航点 0 (dist=0.48m, tol=0.50m)
+2025-01-01 12:00:01,500 [INFO]    NavigationEngine: navigation started, mode=p2p, filter=moving_avg, waypoints=3
+2025-01-01 12:00:02,100 [WARNING] NavigationEngine: navigating but compass accuracy is insufficient (accuracy=0/3). Robot motion stopped. Set COMPASS_MIN_ACCURACY=0 to accept uncalibrated data.
+2025-01-01 12:00:02,200 [WARNING] NavigationEngine: waiting for GPS filter readiness (MovingAvg window not full), navigation paused
+2025-01-01 12:00:06,300 [INFO]    [NAV STATUS] Target: WP#1/3 (30.123450,120.987650), Distance: 3.2m, Bearing error: +12.3°, Linear vel: 0.35, Angular vel: 0.18, Filter: MA(ready), GPS quality: 4
+2025-01-01 12:00:15,200 [INFO]    WaypointManager: arrived at waypoint 0 (dist=0.48m, tol=0.50m)
+2025-01-01 12:00:15,300 [INFO]    CoveragePlanner: generated 48 waypoints, row_spacing=1.00m, overlap=0%, direction=0°
+2025-01-01 12:00:16,000 [INFO]    SerialReader: firmware state -> ACTIVE
 ```
+
+> **注**：代码内部（logger、注释、docstring）全部使用英文，符合团队协作规范。

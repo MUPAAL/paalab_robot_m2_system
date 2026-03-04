@@ -45,6 +45,7 @@ else:
     from sensors.imu_reader import IMUReader, imu_lock, imu_data, imu_available  # type: ignore[assignment]
 from data_recorder import DataRecorder
 from navigation.nav_engine import NavigationEngine, NavMode, FilterMode
+from navigation.coverage_planner import CoveragePlanner
 
 # ── Logging ────────────────────────────────────────────────
 _py_name = Path(__file__).stem
@@ -75,6 +76,10 @@ _data_recorder: DataRecorder | None = None
 _vel_lock   = threading.Lock()
 _last_linear:  float = 0.0
 _last_angular: float = 0.0
+
+# ── Last odometry snapshot (protected by lock) ─────────────
+_odom_lock = threading.Lock()
+_last_odom: dict = {}  # keys: v, w, state, soc, ts
 
 
 # ── HTTP static file server ───────────────────────────────
@@ -241,6 +246,25 @@ class WebController:
             new_state = True
         elif line == b"S:READY":
             new_state = False
+        elif line.startswith(b"O:"):
+            # Odometry: O:{v:.3f},{w:.3f}[,{state_int},{soc}]  ~20 Hz
+            try:
+                parts = line[2:].decode().split(",")
+                v = float(parts[0])
+                w = float(parts[1])
+                state_int = int(parts[2]) if len(parts) > 2 else None
+                soc       = int(parts[3]) if len(parts) > 3 else None
+                with _odom_lock:
+                    _last_odom["v"]     = v
+                    _last_odom["w"]     = w
+                    _last_odom["state"] = state_int
+                    _last_odom["soc"]   = soc
+                    _last_odom["ts"]    = time.time()
+                if self._nav_engine is not None:
+                    self._nav_engine.on_odometry(v, w)
+            except (ValueError, IndexError) as e:
+                logger.warning(f"SerialReader: malformed odometry line: {line!r}: {e}")
+            return
         else:
             return  # ignore unrecognised serial output (e.g. debug prints)
         if self._auto_active == new_state:
@@ -320,6 +344,9 @@ class WebController:
 
                 elif msg_type == "filter_mode":
                     await self._handle_filter_mode(msg)
+
+                elif msg_type == "generate_coverage":
+                    await self._handle_generate_coverage(msg)
 
         except websockets.exceptions.ConnectionClosedError:
             pass
@@ -448,6 +475,70 @@ class WebController:
         except ValueError:
             logger.warning(f"WebSocket: unknown filter mode: {mode_str!r}")
 
+    async def _handle_generate_coverage(self, msg: dict) -> None:
+        """生成覆盖路径并直接加载到导航引擎。
+
+        期望消息格式：
+            {
+              "type": "generate_coverage",
+              "boundary": [[lat, lon], ...],   // 至少 3 个顶点
+              "row_spacing": 1.0,              // 行间距（米）
+              "direction_deg": 0,              // 作业方向（罗盘角）
+              "overlap": 0.0,                 // 行重叠率（可选，默认 0）
+              "tolerance_m": 1.0,             // 航点容差（可选，默认 1.0）
+              "max_speed": 0.5                // 最大速度（可选，默认 0.5）
+            }
+
+        返回消息：
+            {"type": "coverage_ready", "count": N}  — 成功
+            {"type": "coverage_ready", "count": 0, "error": "..."}  — 失败
+        """
+        try:
+            raw_boundary = msg.get("boundary", [])
+            if not isinstance(raw_boundary, list) or len(raw_boundary) < 3:
+                await self._broadcast({
+                    "type": "coverage_ready", "count": 0,
+                    "error": "boundary 至少需要 3 个顶点",
+                })
+                return
+
+            boundary = [(float(p[0]), float(p[1])) for p in raw_boundary]
+            row_spacing   = float(msg.get("row_spacing",   1.0))
+            direction_deg = float(msg.get("direction_deg", 0.0))
+            overlap       = float(msg.get("overlap",       0.0))
+            tolerance_m   = float(msg.get("tolerance_m",  1.0))
+            max_speed     = float(msg.get("max_speed",     0.5))
+
+            planner = CoveragePlanner(
+                boundary      = boundary,
+                row_spacing   = row_spacing,
+                direction_deg = direction_deg,
+                overlap       = overlap,
+                tolerance_m   = tolerance_m,
+                max_speed     = max_speed,
+            )
+            csv_text = planner.generate_csv()
+
+            if self._nav_engine is not None:
+                count = self._nav_engine.load_waypoints(csv_text)
+            else:
+                # 无导航引擎时仍返回 CSV，供客户端保存
+                lines = csv_text.strip().splitlines()
+                count = max(0, len(lines) - 1)
+
+            logger.info(
+                f"WebSocket: coverage path generated, {count} waypoints, "
+                f"row_spacing={row_spacing}m, direction={direction_deg}°"
+            )
+            await self._broadcast({"type": "coverage_ready", "count": count})
+
+        except (ValueError, IndexError, TypeError) as e:
+            logger.error(f"WebSocket: generate_coverage failed: {e}")
+            await self._broadcast({
+                "type": "coverage_ready", "count": 0,
+                "error": str(e),
+            })
+
     # ── IMU broadcast loop (20 Hz) ────────────────────────
     async def _imu_broadcast_loop(self) -> None:
         while True:
@@ -529,6 +620,35 @@ class WebController:
             if self._nav_engine is not None:
                 self._nav_engine.on_rtk(snap)
 
+    # ── Odometry broadcast loop (20 Hz) ───────────────────
+    async def _odom_broadcast_loop(self) -> None:
+        while True:
+            await asyncio.sleep(0.05)  # 20 Hz
+            with _odom_lock:
+                snap = dict(_last_odom)
+            if not snap.get("ts"):
+                continue
+            msg = json.dumps({
+                "type":  "odom",
+                "v":     snap.get("v", 0.0),
+                "w":     snap.get("w", 0.0),
+                "state": snap.get("state"),
+                "soc":   snap.get("soc"),
+                "ts":    snap.get("ts"),
+            })
+            async with self._clients_lock:
+                clients = set(self._clients)
+            if clients:
+                dead = set()
+                for ws in clients:
+                    try:
+                        await ws.send(msg)
+                    except Exception:
+                        dead.add(ws)
+                if dead:
+                    async with self._clients_lock:
+                        self._clients -= dead
+
     # ── Data record loop (5 Hz) ───────────────────────────
     async def _data_record_loop(self) -> None:
         while True:
@@ -540,7 +660,9 @@ class WebController:
             with _vel_lock:
                 linear  = _last_linear
                 angular = _last_angular
-            _data_recorder.record(imu_snap, rtk_snap, linear, angular)
+            with _odom_lock:
+                odom_snap = dict(_last_odom)
+            _data_recorder.record(imu_snap, rtk_snap, linear, angular, odom_snap)
 
     # ── Status broadcast loop (low frequency) ─────────────
     async def _status_broadcast_loop(self) -> None:
@@ -592,6 +714,7 @@ class WebController:
                 self._watchdog_loop(),
                 self._status_broadcast_loop(),
                 self._rtk_broadcast_loop(),
+                self._odom_broadcast_loop(),
                 self._data_record_loop(),
             )
 
