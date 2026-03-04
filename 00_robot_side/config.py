@@ -54,8 +54,8 @@ WATCHDOG_TIMEOUT: float = float(os.environ.get("WATCHDOG_TIMEOUT", "2.0"))
 # ═══════════════════════════════════════════════════════
 # Cameras (OAK-D PoE + MJPEG streams)
 # ═══════════════════════════════════════════════════════
-CAM1_IP: str = os.environ.get("CAM1_IP", "10.95.76.10")
-CAM2_IP: str = os.environ.get("CAM2_IP", "10.95.76.11")
+CAM1_IP: str = os.environ.get("CAM1_IP", "10.95.76.11")
+CAM2_IP: str = os.environ.get("CAM2_IP", "10.95.76.10")
 
 # Front camera IP, always assigned to CAM1_STREAM_PORT (8080).
 # Used to distinguish front/rear when CAM_SELECTION=both; defaults to CAM1_IP.
