@@ -587,3 +587,5 @@ class DepthAlignSource(FrameSource): ...    # 彩色 + 深度拼图
 ```
 
 > **注**：代码内部（logger、注释、docstring）全部使用英文，符合团队协作规范。
+
+python3 -m http.server 8888 --directory 00_robot_side/web_static
