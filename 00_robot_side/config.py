@@ -127,5 +127,5 @@ COMPASS_OFFSET_DEG:   float = float(os.environ.get("COMPASS_OFFSET_DEG",   "0.0"
 # ESP32_IMU_PORT: serial port of the ESP32 IMU board.
 # ESP32_IMU_BAUD: baud rate (default 115200, matches ESP32 firmware).
 IMU_SOURCE:     str   = os.environ.get("IMU_SOURCE",     "esp32")
-ESP32_IMU_PORT: str   = os.environ.get("ESP32_IMU_PORT", "/dev/ttyUSB0")
-ESP32_IMU_BAUD: int   = int(os.environ.get("ESP32_IMU_BAUD", "115200"))
+ESP32_IMU_PORT: str   = os.environ.get("ESP32_IMU_PORT", "/dev/cu.usbmodem1201")
+ESP32_IMU_BAUD: int   = int(os.environ.get("ESP32_IMU_BAUD", "9600"))

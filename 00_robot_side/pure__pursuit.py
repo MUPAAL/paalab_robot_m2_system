@@ -9,12 +9,12 @@ from pathlib import Path
 import serial
 
 from sensors.rtk_reader import RTKReader
-from sensors.imu_reader import IMUReader
+from sensors.esp32_imu_reader import ESP32IMUReader as IMUReader
 
 from navigation.waypoint import Waypoint, WaypointManager
 from navigation.nav_engine import NavigationEngine, NavMode
 
-from config import FEATHER_PORT, SERIAL_BAUD, SERIAL_TIMEOUT, KEY_REPEAT_INTERVAL
+from config import FEATHER_PORT, SERIAL_BAUD, SERIAL_TIMEOUT, KEY_REPEAT_INTERVAL, COMPASS_MIN_ACCURACY
 
 # ── logging ───────────────────────────────────────────────────────────────────
 _py_name = Path(__file__).stem
@@ -55,6 +55,7 @@ waypoints_csv = "id,lat,lon,tolerance_m,max_speed\n" + "\n".join(
 # Start sensor readers at module import time
 imu_reader = IMUReader()
 rtk_reader = RTKReader()
+imu_reader.start()
 rtk_reader.start()
 
 
@@ -94,7 +95,9 @@ class PurePursuitCommandDriver:
             logger.warning("Serial port not open, cannot send velocity")
             return
 
-        cmd = f"V{linear:.2f},{angular:.2f}\n".encode()
+        cmd = f"V{linear:.2f},{angular:.2f}\n"
+        logger.info(f"Sending command: {cmd.strip()}")
+        cmd = cmd.encode()
         try:
             self._ser.write(cmd)
         except Exception as e:
@@ -174,12 +177,12 @@ class PurePursuitCommandDriver:
                 yaw = imu_data["compass"]["bearing"]
                 yaw_accuracy = imu_data["compass"]["accuracy"]
                 logger.debug(f"IMU: yaw={yaw}, accuracy={yaw_accuracy}")
-                if yaw is not None and yaw_accuracy is not None and yaw_accuracy >= 2:
+                if yaw is not None and yaw_accuracy is not None and yaw_accuracy >= COMPASS_MIN_ACCURACY:
                     imu_data = {
                         "compass": {
                             "bearing": yaw,
                             "accuracy": yaw_accuracy,
-                            "calibrated": yaw_accuracy >= 2,
+                            "calibrated": yaw_accuracy >= COMPASS_MIN_ACCURACY,
                         },
                         "accel": {"x": 0.0, "y": 0.0},
                     }

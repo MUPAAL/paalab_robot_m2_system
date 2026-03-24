@@ -19,10 +19,11 @@ Public API (aligned with sensors/imu_reader.py):
         .get_data()    -> dict  — thread-safe latest IMU snapshot
         .is_available  -> bool  — True once first valid line is parsed
 """
-
 import logging
 import threading
 import time
+import json
+import math
 
 import serial
 
@@ -56,6 +57,26 @@ _CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 def _bearing_to_cardinal(bearing: float) -> str:
     return _CARDINALS[int((bearing + 22.5) / 45.0) % 8]
 
+def quaternion_to_euler_enu(w: float, x: float, y: float, z: float) -> tuple[float, float, float]:
+    """Convert quaternion (w,x,y,z) to Euler angles (roll, pitch, yaw) in ENU frame (degrees)."""
+    # Roll (x-axis rotation)
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    # Pitch (y-axis rotation)
+    sinp = 2 * (w * y - z * x)
+    if abs(sinp) >= 1:
+        pitch = math.copysign(math.pi / 2, sinp)  # Use 90 degrees if out of range
+    else:
+        pitch = math.asin(sinp)
+
+    # Yaw (z-axis rotation)
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    return math.degrees(roll), math.degrees(pitch), math.degrees(yaw)
 
 def _yaw_to_bearing_enu(yaw: float) -> float:
     """Convert BNO085 ARVR ENU yaw to compass bearing [0, 360).
@@ -68,16 +89,18 @@ def _yaw_to_bearing_enu(yaw: float) -> float:
 
 
 def _parse_line(raw: str) -> tuple[float, float, float, int] | None:
-    """Parse one serial line.  Returns (roll, pitch, yaw, accuracy) or None."""
-    parts = raw.strip().split(",")
+    """Parse one JSON line. Returns (roll, pitch, yaw, accuracy) or None."""
     try:
-        if len(parts) == 4:
-            return float(parts[0]), float(parts[1]), float(parts[2]), int(parts[3])
-        if len(parts) == 3:
-            return float(parts[0]), float(parts[1]), float(parts[2]), -1
-    except (ValueError, IndexError):
-        pass
-    return None
+        data = json.loads(raw)
+        r = data.get("r")
+        if not r or len(r) < 4:
+            return None
+        w, x, y, z = r[0], r[1], r[2], r[3]
+        roll, pitch, yaw = quaternion_to_euler_enu(w, x, y, z)
+        accuracy = data.get("c", 0)
+        return roll, pitch, yaw, accuracy
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
 
 
 class ESP32IMUReader(threading.Thread):
@@ -138,18 +161,20 @@ class ESP32IMUReader(threading.Thread):
                 self._process_line(raw_str)
 
     def _process_line(self, raw: str) -> None:
-        result = None
         try:
-            result = _parse_line(raw)
-        except Exception as e:
-            logger.warning(f"ESP32IMUReader: parse error [{e}] raw={raw!r}")
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning(f"ESP32IMUReader: invalid JSON: {raw!r}")
             return
 
-        if result is None:
-            logger.warning(f"ESP32IMUReader: unexpected format (not 3 or 4 fields): {raw!r}")
+        r = data.get("r")
+        if not r or len(r) < 4:
+            logger.warning(f"ESP32IMUReader: missing or invalid 'r' field: {raw!r}")
             return
 
-        roll, pitch, yaw, accuracy = result
+        w, x, y, z = r[0], r[1], r[2], r[3]
+        roll, pitch, yaw = quaternion_to_euler_enu(w, x, y, z)
+        accuracy = data.get("c", 0)
 
         # Convert ENU yaw → compass bearing
         bearing = _yaw_to_bearing_enu(yaw)
@@ -161,15 +186,22 @@ class ESP32IMUReader(threading.Thread):
         eff_accuracy = accuracy if accuracy >= 0 else 0
         calibrated = eff_accuracy >= COMPASS_MIN_ACCURACY
 
+        # Get accel data
+        accel_data = data.get("a", [0.0, 0.0, 0.0])
+        if len(accel_data) >= 3:
+            accel_x, accel_y, accel_z = accel_data[0], accel_data[1], accel_data[2]
+        else:
+            accel_x, accel_y, accel_z = 0.0, 0.0, 0.0
+
         snap: dict = {
-            "accel":   {"x": 0.0, "y": 0.0, "z": 0.0},   # ESP32 serial does not send accel
+            "accel":   {"x": accel_x, "y": accel_y, "z": accel_z},
             "gyro":    {"x": roll,  "y": pitch, "z": yaw}, # repurpose for raw angles (deg)
             "compass": {
                 "bearing":    bearing,
                 "cardinal":   cardinal,
                 "calibrated": calibrated,
                 "accuracy":   eff_accuracy,
-                "quat":       {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
+                "quat":       {"w": w, "x": x, "y": y, "z": z},
             },
             "ts": time.time(),
         }
