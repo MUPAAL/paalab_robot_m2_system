@@ -1,8 +1,21 @@
-import json
+"""
+Robot-side local camera viewer with yellow masking and target selection.
+Displays:
+1. Normal live video
+2. Yellow-only view
+3. Yellow-only view where the selected target blob is shown in green
+
+Usage:
+    cd m2_system/00_robot_side
+    python cam.py
+
+Controls:
+    q - quit
+"""
+
 import logging
 import os
 import signal
-import socket
 from pathlib import Path
 
 import cv2
@@ -12,12 +25,8 @@ import numpy as np
 # Default to Camera 2, since that is now the front camera
 _DEVICE_IP = os.environ.get("DEVICE_IP", "10.95.76.11")
 
-# UDP target output for tape_follow.py
-UDP_IP = "127.0.0.1"
-UDP_PORT = 5005
-
 # ── Logging configuration ──────────────────────────────────
-_py_name = Path(__file__).stem
+_py_name = Path(__file__).stemaking
 Path("log").mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
@@ -46,12 +55,7 @@ def main():
     global _stop
     logger.info(f"Starting camera viewer with yellow mask using device IP: {_DEVICE_IP}")
 
-    sock = None
-
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        logger.info(f"UDP target sender ready -> {UDP_IP}:{UDP_PORT}")
-
         logger.info(f"Connecting to device IP: {_DEVICE_IP}")
         _device = dai.Device(dai.DeviceInfo(_DEVICE_IP))
         pipeline_cm = dai.Pipeline(_device)
@@ -100,10 +104,10 @@ def main():
                     # Select the yellow blob to follow
                     # -------------------------------------------------
 
-                    # Bottom half, but trim some off both sides
-                    roi_x1 = int(w * 0.10)
-                    roi_x2 = int(w * 0.90)
-                    roi_y1 = int(h * 0.50)
+                    # Search only in bottom-middle region
+                    roi_x1 = int(w * 0.25)
+                    roi_x2 = int(w * 0.75)
+                    roi_y1 = int(h * 0.55)
                     roi_y2 = h
 
                     roi_mask = yellow_mask[roi_y1:roi_y2, roi_x1:roi_x2]
@@ -137,19 +141,8 @@ def main():
                             best_score = score
                             best_contour = contour
 
-                    # Viewer stays like before:
-                    # chosen target becomes green in the 3rd window
+                    # Create third view starting from yellow-only image
                     chosen_view = yellow_only.copy()
-
-                    # Default target message = no valid target found
-                    target_data = {
-                        "found": False,
-                        "cx": None,
-                        "cy": None,
-                        "error": None,
-                        "area": 0.0,
-                        "frame_width": w,
-                    }
 
                     if best_contour is not None:
                         # Shift contour from ROI coordinates back to full image coordinates
@@ -159,40 +152,10 @@ def main():
 
                         # Create mask for chosen contour
                         chosen_mask = np.zeros((h, w), dtype=np.uint8)
-                        cv2.drawContours(
-                            chosen_mask,
-                            [shifted_contour],
-                            -1,
-                            255,
-                            thickness=cv2.FILLED
-                        )
+                        cv2.drawContours(chosen_mask, [shifted_contour], -1, 255, thickness=cv2.FILLED)
 
-                        # Turn chosen yellow object green in the 3rd viewer
+                        # Turn chosen yellow object green
                         chosen_view[chosen_mask > 0] = (0, 255, 0)
-
-                        # Compute info for THIS SAME chosen green target
-                        M = cv2.moments(shifted_contour)
-                        if M["m00"] != 0:
-                            cx = int(M["m10"] / M["m00"])
-                            cy = int(M["m01"] / M["m00"])
-                            error = cx - (w // 2)
-                            area = float(cv2.contourArea(best_contour))
-
-                            target_data = {
-                                "found": True,
-                                "cx": cx,
-                                "cy": cy,
-                                "error": error,
-                                "area": area,
-                                "frame_width": w,
-                            }
-
-                    # Send chosen target info over UDP
-                    try:
-                        msg = json.dumps(target_data).encode("utf-8")
-                        sock.sendto(msg, (UDP_IP, UDP_PORT))
-                    except Exception as e:
-                        logger.error(f"UDP send error: {e}")
 
                     # Resize for display only
                     display_img = cv2.resize(img, (640, 360))
@@ -212,8 +175,6 @@ def main():
         raise
 
     finally:
-        if sock is not None:
-            sock.close()
         cv2.destroyAllWindows()
         logger.info("Camera viewer stopped")
 

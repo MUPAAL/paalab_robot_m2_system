@@ -3,3 +3,5 @@ CLAUDE.md
 **/__pycache__/*
 **/.DS_Store
 **/.vscode/*
+
+.*env

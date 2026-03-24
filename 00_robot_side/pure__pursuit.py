@@ -1,9 +1,12 @@
 import asyncio
 import math
-import websockets
 import json
-import time
 import traceback
+import logging
+import signal
+import time
+from pathlib import Path
+import serial
 
 from sensors.rtk_reader import RTKReader
 from sensors.imu_reader import IMUReader
@@ -11,175 +14,197 @@ from sensors.imu_reader import IMUReader
 from navigation.waypoint import Waypoint, WaypointManager
 from navigation.nav_engine import NavigationEngine, NavMode
 
-# === IMU and RTK readers ===
-imu_reader = IMUReader()
-rtk_reader = RTKReader()
-rtk_reader.start()
+from config import FEATHER_PORT, SERIAL_BAUD, SERIAL_TIMEOUT, KEY_REPEAT_INTERVAL
 
-# Assuming TARGETS is a list of (lat, lon) tuples, e.g., TARGETS = [(lat1, lon1), (lat2, lon2), ...]
-# If it's from a file, import accordingly. For now, define or import TARGETS here.
-TARGETS = [(38.9073, -92.2683), (38.9074, -92.2684)]  # Example hardcoded targets; replace with actual data
-print(TARGETS)
+# ── logging ───────────────────────────────────────────────────────────────────
+_py_name = Path(__file__).stem
+Path("log").mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(f"log/{_py_name}.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+logger = logging.getLogger(__name__)
 
-# Create waypoints using Waypoint class
-WAYPOINT_RADIUS = 2.0  # meters (adjust as needed)
+_stop = False
+
+def _signal_handler(signum, frame):
+    global _stop
+    logger.info(f"Signal {signum} received, stopping...")
+    _stop = True
+
+
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+
+# ── Navigation waypoints (replace with actual route) ───────────────────────────
+TARGETS = [(38.9073, -92.2683), (38.9074, -92.2684)]
+WAYPOINT_RADIUS = 2.0  # meters
 waypoints = [
     Waypoint(id=i, lat=lat, lon=lon, tolerance_m=WAYPOINT_RADIUS, max_speed=0.6)
     for i, (lat, lon) in enumerate(TARGETS)
 ]
-
-# Generate CSV from waypoints
 waypoints_csv = "id,lat,lon,tolerance_m,max_speed\n" + "\n".join(
     f"{wp.id},{wp.lat},{wp.lon},{wp.tolerance_m},{wp.max_speed}" for wp in waypoints
 )
 
-# Optional: Use WaypointManager to validate or manage waypoints locally
-wp_mgr = WaypointManager()
-num_loaded = wp_mgr.load_csv(waypoints_csv)
-print(f"Loaded {num_loaded} waypoints into local manager")
-# You can now access wp_mgr.current, wp_mgr.waypoints, etc., for debugging or additional logic
-
-from navigation.geo_utils import haversine_distance, bearing_to_target, normalize_angle
-
-# ======================
-# Autonomous navigation task using NavigationEngine
-# ======================
-async def nav_task(ws, nav_engine):
-    try:
-        while True:
-            # Get GPS data
-            pos = rtk_reader.get_data()
-            if pos is not None:
-                lat, lon = pos["lat"], pos["lon"]
-                precision = pos.get("precision", 0.0)
-
-                if precision <= 2 and not math.isnan(precision):
-                    # Send RTK data to nav_engine
-                    rtk_data = {
-                        "lat": lat,
-                        "lon": lon,
-                        "fix_quality": 4 if precision < 0.5 else (5 if precision < 1.0 else 2)
-                    }
-                    nav_engine.on_rtk(rtk_data)
-
-            # Get IMU data
-            yaw = imu_reader.get_yaw()
-            yaw_accuracy = imu_reader.get_accuracy()
-
-            if yaw is not None and yaw_accuracy is not None and yaw_accuracy >= 2:
-                # Send IMU data to nav_engine
-                imu_data = {
-                    "compass": {
-                        "bearing": yaw,
-                        "accuracy": yaw_accuracy,
-                        "calibrated": yaw_accuracy >= 2
-                    },
-                    "accel": {"x": 0.0, "y": 0.0}
-                }
-                nav_engine.on_imu(imu_data)
-
-            await asyncio.sleep(0.05)  # IMU rate ~20Hz
-
-    except Exception as e:
-        print(f"[NAV TASK ERROR] {e}")
-        traceback.print_exc()
+# Start sensor readers at module import time
+imu_reader = IMUReader()
+rtk_reader = RTKReader()
+rtk_reader.start()
 
 
- 
+class PurePursuitCommandDriver:
+    def __init__(self) -> None:
+        self._ser = None
+        self._running = False
 
+        self._lock = __import__('threading').Lock()
+        self._repeat_thread = None
 
+        self._current_linear = 0.0
+        self._current_angular = 0.0
+        self._last_msg_time = 0.0
 
-# ======================
-# Main entry
-# ======================
+        self._nav_engine = NavigationEngine(
+            send_velocity_fn=self._on_nav_velocity,
+            broadcast_fn=self._broadcast_noop,
+            loop=asyncio.get_event_loop(),
+        )
 
-#ping the webserver to automatically find the correct connection
-#necessary due to ip changing (tailscale vs connection via router)
-from pythonping import ping
-def get_connection():
-    uri1 = "100.87.161.11"
-    uri2 = "192.168.0.100"
-    try:
-        response = ping(uri1, count=4, timeout=5)
-        if response.success():
-            print(f"[CONNECTION CHECK] WebSocket server {uri1} is reachable.")
-            return uri1
-        else:
-            print(f"[CONNECTION CHECK] WebSocket server {uri1} is unreachable. Attempting connection to {uri2}")
-            response = ping(uri2, count=4, timeout=5)
-            if response.success():
-                print(f"[CONNECTION CHECK] WebSocket server {uri2} is reachable.")
-                return uri2
-            else:
-                print(f"[CONNECTION CHECK] WebSocket server {uri2} is unreachable.")
-                return None
-    except Exception as e:
-        print(f"[CONNECTION CHECK ERROR] {e}")
-        return None
+    def _broadcast_noop(self, _status: dict) -> None:
+        """No-op broadcast; pure_pursuit uses direct serial velocity commands."""
 
-async def main():
-    while True:
+    def _open_serial(self) -> None:
+        self._ser = serial.Serial(FEATHER_PORT, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
+        logger.info(f"Serial port opened: {FEATHER_PORT} @ {SERIAL_BAUD} baud")
+
+    def _close_serial(self) -> None:
+        if self._ser is not None and self._ser.is_open:
+            self._ser.close()
+            logger.info("Serial port closed")
+
+    def _send_velocity(self, linear: float, angular: float) -> None:
+        if self._ser is None or not self._ser.is_open:
+            logger.warning("Serial port not open, cannot send velocity")
+            return
+
+        cmd = f"V{linear:.2f},{angular:.2f}\n".encode()
         try:
-            port = "8555"
-            ws_uri = get_connection()
-            if ws_uri == None:
-                print("[WS URI] URI is none, connection failed")
-                return 0
-            
-            ws_uri = f"ws://{ws_uri}:{port}"
-            print(f"[URI CHECK] {ws_uri}")
+            self._ser.write(cmd)
+        except Exception as e:
+            logger.error(f"Serial write failed: {e}")
+            self._running = False
 
-            print(f"[MAIN] Connecting to {ws_uri}...")
-            async with websockets.connect(ws_uri) as ws:
-                print("[MAIN] Connected. Starting tasks...")
+    def _send_command(self, linear: float, angular: float) -> None:
+        # Prefer direct V command for precision; preserve safety stop if needed.
+        self._send_velocity(linear, angular)
 
-                # Define send_velocity function
-                def send_velocity(linear, angular):
-                    command = f"v{linear:.2f}w{angular:.2f}"
-                    asyncio.create_task(ws.send(command))
-                    print(f"[NAV] Sending: {command}")
+    def _on_nav_velocity(self, linear: float, angular: float) -> None:
+        with self._lock:
+            self._current_linear = linear
+            self._current_angular = angular
+            self._last_msg_time = time.time()
 
-                # Define broadcast function
-                async def broadcast(status):
-                    try:
-                        await ws.send(f"status:{json.dumps(status)}")
-                    except:
-                        pass
+    def _repeat_loop(self) -> None:
+        logger.info(f"Velocity repeat thread started, rate: {1.0 / KEY_REPEAT_INTERVAL:.0f}Hz")
+        while self._running and not _stop:
+            with self._lock:
+                now = time.time()
+                if now - self._last_msg_time > 0.5:
+                    linear = 0.0
+                    angular = 0.0
+                else:
+                    linear = self._current_linear
+                    angular = self._current_angular
 
-                # Create NavigationEngine
-                loop = asyncio.get_event_loop()
-                nav_engine = NavigationEngine(
-                    send_velocity_fn=send_velocity,
-                    broadcast_fn=broadcast,
-                    loop=loop
-                )
+            self._send_command(linear, angular)
+            time.sleep(KEY_REPEAT_INTERVAL)
 
-                # Load waypoints
-                num_wp = nav_engine.load_waypoints(waypoints_csv)
-                print(f"[NAV] Loaded {num_wp} waypoints")
+    def _initialize_nav(self) -> None:
+        self._nav_engine.load_waypoints(waypoints_csv)
+        self._nav_engine.set_nav_mode(NavMode.PURE_PURSUIT)
+        started = self._nav_engine.start(force=True)
+        if not started:
+            logger.error("NavigationEngine failed to start")
+            raise RuntimeError("NavigationEngine start failed")
+        logger.info("NavigationEngine started in PURE_PURSUIT mode")
 
-                # Set to Pure Pursuit mode
-                nav_engine.set_nav_mode(NavMode.PURE_PURSUIT)
+    def run(self) -> None:
+        self._open_serial()
+        self._running = True
 
-                # Start navigation
-                nav_engine.start(force=True)
+        self._repeat_thread = __import__('threading').Thread(
+            target=self._repeat_loop,
+            daemon=True,
+            name="cmd_repeat",
+        )
+        self._repeat_thread.start()
 
-                await asyncio.gather(
-                    nav_task(ws, nav_engine),
-                )
-        except websockets.exceptions.ConnectionClosedError as e:
-            print(f"[WEBSOCKET ERROR] Connection lost: {e}. Reconnecting in 3s...")
-            traceback.print_exc()
-            await asyncio.sleep(3)
+        self._initialize_nav()
+
+        try:
+            while self._running and not _stop:
+                pos = rtk_reader.get_data()
+                if pos is not None:
+                    lat, lon = pos.get("lat"), pos.get("lon")
+                    precision = pos.get("precision", 0.0)
+                    if precision <= 2 and not math.isnan(precision):
+                        rtk_data = {
+                            "lat": lat,
+                            "lon": lon,
+                            "fix_quality": 4 if precision < 0.5 else (5 if precision < 1.0 else 2),
+                        }
+                        self._nav_engine.on_rtk(rtk_data)
+
+                yaw = imu_reader.get_yaw()
+                yaw_accuracy = imu_reader.get_accuracy()
+                if yaw is not None and yaw_accuracy is not None and yaw_accuracy >= 2:
+                    imu_data = {
+                        "compass": {
+                            "bearing": yaw,
+                            "accuracy": yaw_accuracy,
+                            "calibrated": yaw_accuracy >= 2,
+                        },
+                        "accel": {"x": 0.0, "y": 0.0},
+                    }
+                    self._nav_engine.on_imu(imu_data)
+
+                time.sleep(0.05)
 
         except Exception as e:
-            print(f"[CONTROLLER] Unexpected error: {e}")
+            logger.error(f"Pure pursuit loop error: {e}")
             traceback.print_exc()
-            await asyncio.sleep(3)
+
+        finally:
+            self.shutdown()
+
+    def shutdown(self) -> None:
+        logger.info("Shutting down pure pursuit command driver...")
+        self._running = False
+
+        # Force safe stop command to robot (direct velocity mode)
+        self._send_command(0.0, 0.0)
+
+        if self._repeat_thread and self._repeat_thread.is_alive():
+            self._repeat_thread.join(timeout=2.0)
+
+        self._close_serial()
+        logger.info("Pure pursuit driver stopped")
+
+
+def main() -> None:
+    driver = PurePursuitCommandDriver()
+    driver.run()
+
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except Exception as e:
-        print(f"[CONTROLLER] Error: {e}\n{traceback.format_exc()}")
-
+        logger.error(f"Fatal error in pure pursuit: {e}\n{traceback.format_exc()}")
+        raise
