@@ -42,7 +42,7 @@ signal.signal(signal.SIGTERM, _signal_handler)
 
 
 # ── Navigation waypoints (replace with actual route) ───────────────────────────
-TARGETS = [(38.9073, -92.2683), (38.9074, -92.2684)]
+TARGETS = [(38.9412161, -92.3188177), (38.9412309, -92.3186055)]
 WAYPOINT_RADIUS = 2.0  # meters
 waypoints = [
     Waypoint(id=i, lat=lat, lon=lon, tolerance_m=WAYPOINT_RADIUS, max_speed=0.6)
