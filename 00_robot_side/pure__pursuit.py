@@ -20,7 +20,7 @@ from config import FEATHER_PORT, SERIAL_BAUD, SERIAL_TIMEOUT, KEY_REPEAT_INTERVA
 _py_name = Path(__file__).stem
 Path("log").mkdir(exist_ok=True)
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler(f"log/{_py_name}.log", encoding="utf-8"),
@@ -76,8 +76,9 @@ class PurePursuitCommandDriver:
             loop=asyncio.get_event_loop(),
         )
 
-    def _broadcast_noop(self, _status: dict) -> None:
+    async def _broadcast_noop(self, _status: dict) -> None:
         """No-op broadcast; pure_pursuit uses direct serial velocity commands."""
+        pass
 
     def _open_serial(self) -> None:
         self._ser = serial.Serial(FEATHER_PORT, SERIAL_BAUD, timeout=SERIAL_TIMEOUT)
@@ -109,6 +110,7 @@ class PurePursuitCommandDriver:
             self._current_linear = linear
             self._current_angular = angular
             self._last_msg_time = time.time()
+        logger.debug(f"Nav velocity set: linear={linear:.2f}, angular={angular:.2f}")
 
     def _repeat_loop(self) -> None:
         logger.info(f"Velocity repeat thread started, rate: {1.0 / KEY_REPEAT_INTERVAL:.0f}Hz")
@@ -122,6 +124,7 @@ class PurePursuitCommandDriver:
                     linear = self._current_linear
                     angular = self._current_angular
 
+            logger.debug(f"Sending velocity: linear={linear:.2f}, angular={angular:.2f}")
             self._send_command(linear, angular)
             time.sleep(KEY_REPEAT_INTERVAL)
 
@@ -153,6 +156,7 @@ class PurePursuitCommandDriver:
                 if pos is not None:
                     lat, lon = pos.get("lat"), pos.get("lon")
                     precision = pos.get("precision", 0.0)
+                    logger.debug(f"RTK pos: lat={lat}, lon={lon}, precision={precision}")
                     if precision <= 2 and not math.isnan(precision):
                         rtk_data = {
                             "lat": lat,
@@ -160,9 +164,16 @@ class PurePursuitCommandDriver:
                             "fix_quality": 4 if precision < 0.5 else (5 if precision < 1.0 else 2),
                         }
                         self._nav_engine.on_rtk(rtk_data)
+                        logger.debug("Sent RTK data to nav_engine")
+                    else:
+                        logger.warning(f"RTK precision too low: {precision}")
+                else:
+                    logger.warning("No RTK data received")
 
-                yaw = imu_reader.get_yaw()
-                yaw_accuracy = imu_reader.get_accuracy()
+                imu_data = imu_reader.get_data()
+                yaw = imu_data["compass"]["bearing"]
+                yaw_accuracy = imu_data["compass"]["accuracy"]
+                logger.debug(f"IMU: yaw={yaw}, accuracy={yaw_accuracy}")
                 if yaw is not None and yaw_accuracy is not None and yaw_accuracy >= 2:
                     imu_data = {
                         "compass": {
@@ -173,6 +184,9 @@ class PurePursuitCommandDriver:
                         "accel": {"x": 0.0, "y": 0.0},
                     }
                     self._nav_engine.on_imu(imu_data)
+                    logger.debug("Sent IMU data to nav_engine")
+                else:
+                    logger.warning(f"IMU data invalid: yaw={yaw}, accuracy={yaw_accuracy}")
 
                 time.sleep(0.05)
 
