@@ -101,6 +101,7 @@ class PurePursuitCommandDriver:
         self._ws_lock = asyncio.Lock()
         self._ws_connected = False
         self._heartbeat_task = None
+        self._ws_message_task = None
 
     async def _broadcast_noop(self, _status: dict) -> None:
         """Broadcast navigation status to web controller if connected."""
@@ -173,6 +174,15 @@ class PurePursuitCommandDriver:
             except Exception as e:
                 logger.debug(f"Failed to send velocity command to web controller: {e}")
                 self._ws_connected = False
+
+    async def _send_heartbeat(self) -> None:
+        """Send periodic heartbeat messages to web controller."""
+        try:
+            while self._ws_connected and self._ws:
+                await self._ws.send(json.dumps({"type": "heartbeat"}))
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.debug(f"Heartbeat task ended: {e}")
 
     async def _handle_ws_messages(self) -> None:
         """Handle incoming WebSocket messages from web controller."""

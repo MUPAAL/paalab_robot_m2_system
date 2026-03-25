@@ -281,11 +281,20 @@ class WebController:
                 self._loop,
             )
             # If firmware state became inactive and we are in pure_pursuit mode, stop navigation
-            if not new_state and self._nav_engine is not None and self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+            if not new_state and self._nav_engine is not None and self._nav_engine._nav_mode == NavMode.PURE_PURSUIT:
                 asyncio.run_coroutine_threadsafe(
                     self._broadcast({"type": "nav_stop"}),
                     self._loop,
                 )
+                # Terminate the pure_pursuit subprocess
+                if self._pure_pursuit_proc and self._pure_pursuit_proc.poll() is None:
+                    self._pure_pursuit_proc.terminate()
+                    try:
+                        self._pure_pursuit_proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self._pure_pursuit_proc.kill()
+                    self._pure_pursuit_proc = None
+                    logger.info("Terminated pure_pursuit subprocess due to firmware deactivation")
 
     # ── WebSocket handler ─────────────────────────────────
     async def _ws_handler(self, websocket) -> None:
@@ -443,7 +452,7 @@ class WebController:
         """Handle navigation start command."""
         if self._nav_engine is None:
             return
-        if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+        if self._nav_engine._nav_mode == NavMode.PURE_PURSUIT:
             if self._pure_pursuit_proc is None or self._pure_pursuit_proc.poll() is not None:
                 if self._current_waypoints_csv:
                     env = os.environ.copy()
@@ -474,7 +483,7 @@ class WebController:
         """Handle force-start navigation command (bypass GPS fix check)."""
         if self._nav_engine is None:
             return
-        if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+        if self._nav_engine._nav_mode == NavMode.PURE_PURSUIT:
             await self._broadcast({"type": "nav_start"})
         else:
             ok = self._nav_engine.start(force=True)
@@ -492,7 +501,7 @@ class WebController:
         """Handle navigation stop command."""
         if self._nav_engine is None:
             return
-        if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+        if self._nav_engine._nav_mode == NavMode.PURE_PURSUIT:
             if self._pure_pursuit_proc and self._pure_pursuit_proc.poll() is None:
                 self._pure_pursuit_proc.terminate()
                 try:
