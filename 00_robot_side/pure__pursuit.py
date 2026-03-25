@@ -9,14 +9,12 @@ import sys
 import os
 import argparse
 from pathlib import Path
-import serial
 import websockets
 
 from navigation.waypoint import Waypoint, WaypointManager
 from navigation.nav_engine import NavigationEngine, NavMode
-from core.serial_writer import SerialWriter
 
-from config import FEATHER_PORT, SERIAL_BAUD, SERIAL_TIMEOUT, KEY_REPEAT_INTERVAL, COMPASS_MIN_ACCURACY, WEB_WS_PORT
+from config import WEB_WS_PORT
 
 # ── logging ───────────────────────────────────────────────────────────────────
 _py_name = Path(__file__).stem
@@ -77,7 +75,6 @@ else:
 
 class PurePursuitCommandDriver:
     def __init__(self) -> None:
-        self._serial = SerialWriter(port=FEATHER_PORT)
         self._running = False
 
         self._lock = __import__('threading').Lock()
@@ -207,45 +204,13 @@ class PurePursuitCommandDriver:
         except Exception as e:
             logger.warning(f"WS message handling error: {e}")
 
-    def _open_serial(self) -> None:
-        self._serial.open()
-        logger.info("SerialWriter opened")
-
-        # Put the robot into auto mode for pure pursuit (same as LocalController Enter key)
-        # The board firmware expects this before V commands take effect.
-        try:
-            # Send \r directly using SerialWriter's internal serial port
-            # (Note: SerialWriter doesn't have a method for \r, so we access the port directly with locking)
-            if self._serial.is_open:
-                import serial as serial_module
-                with self._serial._lock:
-                    self._serial._ser.write(b"\r")
-                logger.info("Auto-ready -> auto-active request sent")
-                time.sleep(0.1)
-        except Exception as e:
-            logger.error(f"Failed to request auto-active state: {e}")
-
-    def _close_serial(self) -> None:
-        self._serial.close()
-        logger.info("Serial port closed")
-
-    def _send_command(self, linear: float, angular: float) -> None:
-        """Send velocity command V{linear:.2f},{angular:.2f}\\n to Feather M4."""
-        if not self._serial.is_open:
-            logger.warning("Serial port not open, cannot send velocity")
-            return
-
-        cmd = f"V{linear:.2f},{angular:.2f}\n"
-        logger.debug(f"Sending command: {cmd.strip()}")
-        try:
-            # Use SerialWriter's internal port with locking for custom V command format
-            with self._serial._lock:
-                self._serial._ser.write(cmd.encode())
-        except Exception as e:
-            logger.error(f"Serial write failed: {e}")
-            self._running = False
-        
-        # Also send to web controller for logging
+    def _on_nav_velocity(self, linear: float, angular: float) -> None:
+        with self._lock:
+            self._current_linear = linear
+            self._current_angular = angular
+            self._last_msg_time = time.time()
+        logger.debug(f"Nav velocity set: linear={linear:.2f}, angular={angular:.2f}")
+        # Send velocity command to web controller via WebSocket
         if self._ws_connected and self._ws and self._loop is not None:
             try:
                 asyncio.run_coroutine_threadsafe(
@@ -256,29 +221,6 @@ class PurePursuitCommandDriver:
                 logger.debug(f"Failed to queue velocity command to web controller: {e}")
         elif self._ws_connected and self._ws:
             logger.debug("WebSocket connected but no loop set for thread-safe dispatch")
-
-    def _on_nav_velocity(self, linear: float, angular: float) -> None:
-        with self._lock:
-            self._current_linear = linear
-            self._current_angular = angular
-            self._last_msg_time = time.time()
-        logger.debug(f"Nav velocity set: linear={linear:.2f}, angular={angular:.2f}")
-
-    def _repeat_loop(self) -> None:
-        logger.info(f"Velocity repeat thread started, rate: {1.0 / KEY_REPEAT_INTERVAL:.0f}Hz")
-        while self._running and not _stop:
-            with self._lock:
-                now = time.time()
-                if now - self._last_msg_time > 0.5:
-                    linear = 0.0
-                    angular = 0.0
-                else:
-                    linear = self._current_linear
-                    angular = self._current_angular
-
-            logger.debug(f"Sending velocity: linear={linear:.2f}, angular={angular:.2f}")
-            self._send_command(linear, angular)
-            time.sleep(KEY_REPEAT_INTERVAL)
 
     def _initialize_nav(self) -> None:
         self._nav_engine.load_waypoints(waypoints_csv)
@@ -291,15 +233,7 @@ class PurePursuitCommandDriver:
         self._loop = asyncio.get_running_loop()
 
         await self._connect_websocket()
-        self._open_serial()
         self._running = True
-
-        self._repeat_thread = __import__('threading').Thread(
-            target=self._repeat_loop,
-            daemon=True,
-            name="cmd_repeat",
-        )
-        self._repeat_thread.start()
 
         self._initialize_nav()
 
@@ -321,25 +255,6 @@ class PurePursuitCommandDriver:
     def shutdown(self) -> None:
         logger.info("Shutting down pure pursuit command driver...")
         self._running = False
-
-        # Force safe stop command to robot (direct velocity mode)
-        time.sleep(0.1)  # Ensure stop command is sent before thread exits
-
-        if self._repeat_thread and self._repeat_thread.is_alive():
-            self._repeat_thread.join(timeout=2.0)
-
-        # Exit auto mode back to ready state
-        if self._serial.is_open:
-            try:
-                with self._serial._lock:
-                    self._serial._ser.write(b"\r")
-                logger.info("Auto-active -> auto-ready request sent")
-                time.sleep(0.1)
-                logger.info("Auto-active -> auto-ready request sent")
-            except Exception as e:
-                logger.error(f"Failed to send auto-ready state request: {e}")
-
-        self._close_serial()
         logger.info("Pure pursuit driver stopped")
 
 

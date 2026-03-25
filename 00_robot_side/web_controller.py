@@ -339,11 +339,21 @@ class WebController:
                         logger.warning(f"WebSocket: malformed joystick message: {e}")
 
                 elif msg_type == "velocity_command":
-                    # Log velocity commands from autonomous systems
+                    # Handle velocity commands from autonomous systems (e.g., pure_pursuit subprocess)
                     try:
                         linear  = float(msg.get("linear",  0.0))
                         angular = float(msg.get("angular", 0.0))
+                        # Clamp to configured velocity limits
+                        linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
+                        angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
                         logger.info(f"Autonomous velocity command: linear={linear:.2f}, angular={angular:.2f}")
+                        # Only send if navigation is active (ignore joystick when autonomous)
+                        nav_active = (
+                            self._nav_engine is not None
+                            and self._nav_engine.get_status().get("state") == "navigating"
+                        )
+                        if nav_active:
+                            self._send_velocity(linear, angular)
                     except (TypeError, ValueError) as e:
                         logger.warning(f"WebSocket: malformed velocity_command message: {e}")
 
