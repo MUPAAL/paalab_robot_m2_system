@@ -5,6 +5,9 @@ import traceback
 import logging
 import signal
 import time
+import sys
+import os
+import argparse
 from pathlib import Path
 import serial
 import websockets
@@ -40,16 +43,36 @@ signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 
 
+# ── Parse command-line arguments ──────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="Pure Pursuit Navigation Driver")
+parser.add_argument(
+    "--waypoints",
+    type=str,
+    help="CSV string of waypoints (format: id,lat,lon,tolerance_m,max_speed\\n...)",
+    default=None
+)
+args = parser.parse_args()
+
+
 # ── Navigation waypoints (replace with actual route) ───────────────────────────
 TARGETS = [(38.9412161, -92.3188177), (38.9412309, -92.3186055)]
 WAYPOINT_RADIUS = 2.0  # meters
-waypoints = [
-    Waypoint(id=i, lat=lat, lon=lon, tolerance_m=WAYPOINT_RADIUS, max_speed=0.6)
-    for i, (lat, lon) in enumerate(TARGETS)
-]
-waypoints_csv = "id,lat,lon,tolerance_m,max_speed\n" + "\n".join(
-    f"{wp.id},{wp.lat},{wp.lon},{wp.tolerance_m},{wp.max_speed}" for wp in waypoints
-)
+
+if args.waypoints:
+    waypoints_csv = args.waypoints
+    logger.info("Using waypoints from command-line argument")
+elif os.environ.get('WAYPOINTS_CSV'):
+    waypoints_csv = os.environ['WAYPOINTS_CSV']
+    logger.info("Using waypoints from environment variable")
+else:
+    waypoints = [
+        Waypoint(id=i, lat=lat, lon=lon, tolerance_m=WAYPOINT_RADIUS, max_speed=0.6)
+        for i, (lat, lon) in enumerate(TARGETS)
+    ]
+    waypoints_csv = "id,lat,lon,tolerance_m,max_speed\n" + "\n".join(
+        f"{wp.id},{wp.lat},{wp.lon},{wp.tolerance_m},{wp.max_speed}" for wp in waypoints
+    )
+    logger.info("Using default hardcoded waypoints")
 
 
 class PurePursuitCommandDriver:

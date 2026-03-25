@@ -21,6 +21,7 @@ Usage:
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -143,6 +144,7 @@ class WebController:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._nav_engine: NavigationEngine | None = None
         self._pure_pursuit_proc: subprocess.Popen | None = None
+        self._current_waypoints_csv: str | None = None
 
     # ── Serial ────────────────────────────────────────────
     def open_serial(self) -> None:
@@ -430,6 +432,7 @@ class WebController:
             return
         try:
             count = self._nav_engine.load_waypoints(csv_text)
+            self._current_waypoints_csv = csv_text
             await self._broadcast({"type": "waypoints_loaded", "count": count})
             logger.info(f"WebSocket: waypoints loaded, total={count}")
         except Exception as e:
@@ -441,6 +444,19 @@ class WebController:
         if self._nav_engine is None:
             return
         if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+            if self._pure_pursuit_proc is None or self._pure_pursuit_proc.poll() is not None:
+                if self._current_waypoints_csv:
+                    env = os.environ.copy()
+                    env['WAYPOINTS_CSV'] = self._current_waypoints_csv
+                    self._pure_pursuit_proc = subprocess.Popen(
+                        ["python", "pure__pursuit.py"],
+                        env=env,
+                        cwd=Path(__file__).parent
+                    )
+                    logger.info("Started pure_pursuit subprocess")
+                else:
+                    logger.warning("No waypoints loaded, cannot start pure_pursuit")
+                    return
             await self._broadcast({"type": "nav_start"})
         else:
             ok = self._nav_engine.start()
@@ -477,6 +493,14 @@ class WebController:
         if self._nav_engine is None:
             return
         if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+            if self._pure_pursuit_proc and self._pure_pursuit_proc.poll() is None:
+                self._pure_pursuit_proc.terminate()
+                try:
+                    self._pure_pursuit_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._pure_pursuit_proc.kill()
+                self._pure_pursuit_proc = None
+                logger.info("Terminated pure_pursuit subprocess")
             await self._broadcast({"type": "nav_stop"})
         else:
             self._nav_engine.stop()
