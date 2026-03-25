@@ -2,9 +2,11 @@
 ESP32 IMU Reader — BNO085 via serial UART
 
 Serial protocol (ESP32 firmware output):
-    Format : "roll,pitch,yaw,accuracy\\n"
-    Example: "12.34,-5.67,135.20,3\\n"
-    Fields :
+    Supports two formats:
+    1. JSON format (new): {"t":timestamp,"r":[w,x,y,z],"a":[ax,ay,az],"g":[gx,gy,gz],"l":[lx,ly,lz],"v":[vx,vy,vz],"w":[wx,wy,wz],"m":[mx,my,mz],"s":status,"c":accuracy}
+    2. CSV format (old): "roll,pitch,yaw,accuracy\\n"
+    Example CSV: "12.34,-5.67,135.20,3\\n"
+    Fields (CSV):
         roll     float  degrees, around X-axis
         pitch    float  degrees, around Y-axis
         yaw      float  degrees, around Z-axis
@@ -12,7 +14,6 @@ Serial protocol (ESP32 firmware output):
                             yaw=0 → East, counter-clockwise positive
                         bearing (compass, clockwise from North) = (90 - yaw) % 360
         accuracy int    0-3, BNO085 magnetometer calibration accuracy
-                        3 fields (no accuracy) also accepted; accuracy defaults to -1
 
 Public API (aligned with sensors/imu_reader.py):
     ESP32IMUReader(threading.Thread, daemon=True)
@@ -130,26 +131,41 @@ class ESP32IMUReader(threading.Thread):
     def run(self) -> None:
         logger.info(f"ESP32IMUReader: opening {ESP32_IMU_PORT} @ {ESP32_IMU_BAUD} baud")
         try:
-            ser = serial.Serial(ESP32_IMU_PORT, ESP32_IMU_BAUD, timeout=2.0)
+            ser = serial.Serial(ESP32_IMU_PORT, ESP32_IMU_BAUD, timeout=0.1)
         except serial.SerialException as e:
             logger.error(f"ESP32IMUReader: failed to open serial port [{ESP32_IMU_PORT}]: {e}")
             return  # is_available stays False → graceful degradation
 
         logger.info(f"ESP32IMUReader: serial port opened: {ser.name}")
         buf = b""
+        consecutive_errors = 0
 
         while True:
             try:
-                chunk = ser.read(ser.in_waiting or 1)
+                # Read available data with a small timeout
+                if ser.in_waiting > 0:
+                    chunk = ser.read(ser.in_waiting)
+                else:
+                    # Small sleep to avoid busy waiting
+                    time.sleep(0.01)
+                    continue
             except serial.SerialException as e:
                 logger.error(f"ESP32IMUReader: serial read error: {e}")
                 time.sleep(0.1)
                 continue
 
             if not chunk:
+                consecutive_errors += 1
+                if consecutive_errors > 10:
+                    logger.warning("ESP32IMUReader: too many consecutive empty reads, resetting buffer")
+                    buf = b""
+                    consecutive_errors = 0
                 continue
-
+            
+            consecutive_errors = 0
             buf += chunk
+            
+            # Process complete lines
             while b"\n" in buf:
                 raw_bytes, buf = buf.split(b"\n", 1)
                 raw_str = raw_bytes.decode("ascii", errors="replace").strip()
@@ -159,14 +175,47 @@ class ESP32IMUReader(threading.Thread):
                         logger.debug(f"ESP32IMUReader: [fw] {raw_str}")
                     continue
                 self._process_line(raw_str)
+            
+            # Prevent buffer from growing too large (in case of no newlines)
+            if len(buf) > 10000:
+                logger.warning("ESP32IMUReader: buffer too large, resetting")
+                buf = b""
 
     def _process_line(self, raw: str) -> None:
+        # First try JSON format (new firmware)
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning(f"ESP32IMUReader: invalid JSON: {raw!r}")
+            self._process_json_data(data, raw)
             return
+        except json.JSONDecodeError:
+            pass
+        
+        # Fall back to CSV format (old firmware): roll,pitch,yaw,accuracy
+        try:
+            parts = raw.split(',')
+            if len(parts) >= 3:
+                roll = float(parts[0])
+                pitch = float(parts[1]) 
+                yaw = float(parts[2])
+                accuracy = int(parts[3]) if len(parts) > 3 else 0
+                
+                # Convert to quaternion (approximate, using yaw only for now)
+                # For full conversion, we'd need proper quaternion math
+                # For now, create a basic quaternion from yaw
+                yaw_rad = math.radians(yaw)
+                w = math.cos(yaw_rad / 2)
+                z = math.sin(yaw_rad / 2)
+                x = 0.0
+                y = 0.0
+                
+                self._process_euler_data(roll, pitch, yaw, accuracy, w, x, y, z, raw)
+                return
+        except (ValueError, IndexError):
+            pass
+        
+        logger.warning(f"ESP32IMUReader: could not parse line as JSON or CSV: {raw!r}")
 
+    def _process_json_data(self, data: dict, raw: str) -> None:
         r = data.get("r")
         if not r or len(r) < 4:
             logger.warning(f"ESP32IMUReader: missing or invalid 'r' field: {raw!r}")
@@ -175,7 +224,22 @@ class ESP32IMUReader(threading.Thread):
         w, x, y, z = r[0], r[1], r[2], r[3]
         roll, pitch, yaw = quaternion_to_euler_enu(w, x, y, z)
         accuracy = data.get("c", 0)
+        
+        # Get accel data from JSON
+        accel_data = data.get("a", [0.0, 0.0, 0.0])
+        if len(accel_data) >= 3:
+            accel_x, accel_y, accel_z = accel_data[0], accel_data[1], accel_data[2]
+        else:
+            accel_x, accel_y, accel_z = 0.0, 0.0, 0.0
+            
+        self._process_euler_data_with_accel(roll, pitch, yaw, accuracy, w, x, y, z, accel_x, accel_y, accel_z, raw)
 
+    def _process_euler_data(self, roll: float, pitch: float, yaw: float, accuracy: int, 
+                           w: float, x: float, y: float, z: float, raw: str) -> None:
+        self._process_euler_data_with_accel(roll, pitch, yaw, accuracy, w, x, y, z, 0.0, 0.0, 0.0, raw)
+
+    def _process_euler_data_with_accel(self, roll: float, pitch: float, yaw: float, accuracy: int, 
+                           w: float, x: float, y: float, z: float, accel_x: float, accel_y: float, accel_z: float, raw: str) -> None:
         # Convert ENU yaw → compass bearing
         bearing = _yaw_to_bearing_enu(yaw)
         # Apply static magnetic-north alignment offset
@@ -185,13 +249,6 @@ class ESP32IMUReader(threading.Thread):
         # accuracy = -1 means firmware does not report it; treat as uncalibrated
         eff_accuracy = accuracy if accuracy >= 0 else 0
         calibrated = eff_accuracy >= COMPASS_MIN_ACCURACY
-
-        # Get accel data
-        accel_data = data.get("a", [0.0, 0.0, 0.0])
-        if len(accel_data) >= 3:
-            accel_x, accel_y, accel_z = accel_data[0], accel_data[1], accel_data[2]
-        else:
-            accel_x, accel_y, accel_z = 0.0, 0.0, 0.0
 
         snap: dict = {
             "accel":   {"x": accel_x, "y": accel_y, "z": accel_z},

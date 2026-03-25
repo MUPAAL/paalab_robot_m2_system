@@ -21,6 +21,7 @@ Usage:
 import asyncio
 import json
 import logging
+import subprocess
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -141,6 +142,7 @@ class WebController:
         self._auto_active = False  # tracks current AUTO state (updated by serial reader thread)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._nav_engine: NavigationEngine | None = None
+        self._pure_pursuit_proc: subprocess.Popen | None = None
 
     # ── Serial ────────────────────────────────────────────
     def open_serial(self) -> None:
@@ -276,6 +278,12 @@ class WebController:
                 self._broadcast({"type": "state_status", "active": new_state}),
                 self._loop,
             )
+            # If firmware state became inactive and we are in pure_pursuit mode, stop navigation
+            if not new_state and self._nav_engine is not None and self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+                asyncio.run_coroutine_threadsafe(
+                    self._broadcast({"type": "nav_stop"}),
+                    self._loop,
+                )
 
     # ── WebSocket handler ─────────────────────────────────
     async def _ws_handler(self, websocket) -> None:
@@ -307,16 +315,30 @@ class WebController:
                         self._nav_engine is not None
                         and self._nav_engine.get_status().get("state") == "navigating"
                     )
-                    if not nav_active:
-                        try:
-                            linear  = float(msg.get("linear",  0.0))
-                            angular = float(msg.get("angular", 0.0))
-                            # Clamp to configured velocity limits
-                            linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
-                            angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
+                    try:
+                        linear  = float(msg.get("linear",  0.0))
+                        angular = float(msg.get("angular", 0.0))
+                        # Clamp to configured velocity limits
+                        linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
+                        angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
+                        logger.info(f"Velocity command received: linear={linear:.2f}, angular={angular:.2f}")
+                        if not nav_active:
                             self._send_velocity(linear, angular)
-                        except (TypeError, ValueError) as e:
-                            logger.warning(f"WebSocket: malformed joystick message: {e}")
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"WebSocket: malformed joystick message: {e}")
+
+                elif msg_type == "velocity_command":
+                    # Log velocity commands from autonomous systems
+                    try:
+                        linear  = float(msg.get("linear",  0.0))
+                        angular = float(msg.get("angular", 0.0))
+                        logger.info(f"Autonomous velocity command: linear={linear:.2f}, angular={angular:.2f}")
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"WebSocket: malformed velocity_command message: {e}")
+
+                elif msg_type == "nav_status":
+                    # Forward navigation status from pure_pursuit subprocess to all clients
+                    await self._broadcast(msg)
 
                 elif msg_type == "toggle_state":
                     self._last_heartbeat = time.time()
@@ -418,38 +440,47 @@ class WebController:
         """Handle navigation start command."""
         if self._nav_engine is None:
             return
-        ok = self._nav_engine.start()
-        if not ok:
-            status = self._nav_engine.get_status()
-            await self._broadcast({
-                "type":  "nav_status",
-                "error": "Unable to start navigation (no waypoints or insufficient GPS signal)",
-                **status,
-            })
+        if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+            await self._broadcast({"type": "nav_start"})
         else:
-            await self._broadcast(self._nav_engine.get_status())
+            ok = self._nav_engine.start()
+            if not ok:
+                status = self._nav_engine.get_status()
+                await self._broadcast({
+                    "type":  "nav_status",
+                    "error": "Unable to start navigation (no waypoints or insufficient GPS signal)",
+                    **status,
+                })
+            else:
+                await self._broadcast(self._nav_engine.get_status())
 
     async def _handle_nav_start_force(self) -> None:
         """Handle force-start navigation command (bypass GPS fix check)."""
         if self._nav_engine is None:
             return
-        ok = self._nav_engine.start(force=True)
-        if not ok:
-            status = self._nav_engine.get_status()
-            await self._broadcast({
-                "type":  "nav_status",
-                "error": "Unable to start navigation (no waypoints)",
-                **status,
-            })
+        if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+            await self._broadcast({"type": "nav_start"})
         else:
-            await self._broadcast(self._nav_engine.get_status())
+            ok = self._nav_engine.start(force=True)
+            if not ok:
+                status = self._nav_engine.get_status()
+                await self._broadcast({
+                    "type":  "nav_status",
+                    "error": "Unable to start navigation (no waypoints)",
+                    **status,
+                })
+            else:
+                await self._broadcast(self._nav_engine.get_status())
 
     async def _handle_nav_stop(self) -> None:
         """Handle navigation stop command."""
         if self._nav_engine is None:
             return
-        self._nav_engine.stop()
-        await self._broadcast(self._nav_engine.get_status())
+        if self._nav_engine.get_mode() == NavMode.PURE_PURSUIT:
+            await self._broadcast({"type": "nav_stop"})
+        else:
+            self._nav_engine.stop()
+            await self._broadcast(self._nav_engine.get_status())
 
     async def _handle_nav_mode(self, msg: dict) -> None:
         """Switch navigation algorithm mode (p2p / pure_pursuit)."""
@@ -458,8 +489,18 @@ class WebController:
         mode_str = msg.get("mode", "")
         try:
             mode = NavMode(mode_str)
-            self._nav_engine.set_nav_mode(mode)
-            await self._broadcast(self._nav_engine.get_status())
+            if mode == NavMode.PURE_PURSUIT:
+                if self._pure_pursuit_proc is None or self._pure_pursuit_proc.poll() is not None:
+                    self._pure_pursuit_proc = subprocess.Popen(["python", "pure__pursuit.py"])
+                    logger.info("Started pure_pursuit.py subprocess")
+                # Do not set mode on self._nav_engine for pure_pursuit
+            else:
+                if self._pure_pursuit_proc and self._pure_pursuit_proc.poll() is None:
+                    self._pure_pursuit_proc.terminate()
+                    self._pure_pursuit_proc.wait()
+                    logger.info("Terminated pure_pursuit.py subprocess")
+                self._nav_engine.set_nav_mode(mode)
+                await self._broadcast(self._nav_engine.get_status())
         except ValueError:
             logger.warning(f"WebSocket: unknown navigation mode: {mode_str!r}")
 
@@ -776,6 +817,9 @@ def main() -> None:
         logger.info("Interrupted by user, shutting down...")
     finally:
         controller.close_serial()
+        if controller._pure_pursuit_proc and controller._pure_pursuit_proc.poll() is None:
+            controller._pure_pursuit_proc.terminate()
+            controller._pure_pursuit_proc.wait()
         logger.info("Web Controller stopped")
 
 
