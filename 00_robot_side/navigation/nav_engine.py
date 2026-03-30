@@ -414,10 +414,12 @@ class NavigationEngine:
                 linear, angular = self._p2p_ctrl.compute(
                     robot_lat, robot_lon, bearing, wp, dt,
                 )
-
             # Clamp to configured limits
             linear  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear))
             angular = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular))
+
+            logger.debug(f"NavigationEngine: PurePursuitController output -> linear: {linear:.2f} m/s, angular: {angular:.2f} deg/s")
+
 
             # Capture status snapshot for periodic terminal log (every 5 s)
             _status_snap = None

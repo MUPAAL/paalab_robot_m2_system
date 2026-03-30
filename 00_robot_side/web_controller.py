@@ -476,22 +476,22 @@ class WebController:
             logger.warning(f"WebSocket: unknown filter mode: {mode_str!r}")
 
     async def _handle_generate_coverage(self, msg: dict) -> None:
-        """生成覆盖路径并直接加载到导航引擎。
+        """Generate a coverage path and load it into the navigation engine.
 
-        期望消息格式：
+        Expected message format:
             {
               "type": "generate_coverage",
-              "boundary": [[lat, lon], ...],   // 至少 3 个顶点
-              "row_spacing": 1.0,              // 行间距（米）
-              "direction_deg": 0,              // 作业方向（罗盘角）
-              "overlap": 0.0,                 // 行重叠率（可选，默认 0）
-              "tolerance_m": 1.0,             // 航点容差（可选，默认 1.0）
-              "max_speed": 0.5                // 最大速度（可选，默认 0.5）
+              "boundary": [[lat, lon], ...],   # at least 3 vertices
+              "row_spacing": 1.0,              # row spacing (meters)
+              "direction_deg": 0,              # operation direction (compass degrees)
+              "overlap": 0.0,                 # row overlap ratio (optional, default 0)
+              "tolerance_m": 1.0,             # waypoint tolerance (optional, default 1.0)
+              "max_speed": 0.5                # max speed (optional, default 0.5)
             }
 
-        返回消息：
-            {"type": "coverage_ready", "count": N}  — 成功
-            {"type": "coverage_ready", "count": 0, "error": "..."}  — 失败
+        Response message:
+            {"type": "coverage_ready", "count": N}  -- success
+            {"type": "coverage_ready", "count": 0, "error": "..."}  -- failure
         """
         try:
             raw_boundary = msg.get("boundary", [])

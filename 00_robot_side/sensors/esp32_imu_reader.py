@@ -2,17 +2,13 @@
 ESP32 IMU Reader — BNO085 via serial UART
 
 Serial protocol (ESP32 firmware output):
-    Format : "roll,pitch,yaw,accuracy\\n"
-    Example: "12.34,-5.67,135.20,3\\n"
+    Format : JSON object per line
+    Example: {"r":[qi,qj,qk,qr,rot_acc],"a":[ax,ay,az],"w":[wx,wy,wz],"c":cal_status}
     Fields :
-        roll     float  degrees, around X-axis
-        pitch    float  degrees, around Y-axis
-        yaw      float  degrees, around Z-axis
-                        BNO085 ARVR_STABILIZED_RV uses ENU frame:
-                            yaw=0 → East, counter-clockwise positive
-                        bearing (compass, clockwise from North) = (90 - yaw) % 360
-        accuracy int    0-3, BNO085 magnetometer calibration accuracy
-                        3 fields (no accuracy) also accepted; accuracy defaults to -1
+        r  rotation-vector quaternion + accuracy
+        a  accelerometer [x,y,z]
+        w  gyroscope [x,y,z]
+        c  calibration status 0-3
 
 Public API (aligned with sensors/imu_reader.py):
     ESP32IMUReader(threading.Thread, daemon=True)
@@ -20,7 +16,9 @@ Public API (aligned with sensors/imu_reader.py):
         .is_available  -> bool  — True once first valid line is parsed
 """
 
+import json
 import logging
+import math
 import threading
 import time
 
@@ -57,27 +55,13 @@ def _bearing_to_cardinal(bearing: float) -> str:
     return _CARDINALS[int((bearing + 22.5) / 45.0) % 8]
 
 
-def _yaw_to_bearing_enu(yaw: float) -> float:
-    """Convert BNO085 ARVR ENU yaw to compass bearing [0, 360).
-
-    ENU frame: yaw=0 → East, counter-clockwise positive.
-    Compass bearing: 0 → North, clockwise positive.
-    Formula: bearing = (90 - yaw) % 360
-    """
-    return (90.0 - yaw) % 360.0
-
-
-def _parse_line(raw: str) -> tuple[float, float, float, int] | None:
-    """Parse one serial line.  Returns (roll, pitch, yaw, accuracy) or None."""
-    parts = raw.strip().split(",")
+def _parse_line(raw: str) -> dict | None:
+    """Parse one serial line. Returns decoded JSON object or None."""
     try:
-        if len(parts) == 4:
-            return float(parts[0]), float(parts[1]), float(parts[2]), int(parts[3])
-        if len(parts) == 3:
-            return float(parts[0]), float(parts[1]), float(parts[2]), -1
-    except (ValueError, IndexError):
-        pass
-    return None
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 class ESP32IMUReader(threading.Thread):
@@ -149,12 +133,28 @@ class ESP32IMUReader(threading.Thread):
             logger.warning(f"ESP32IMUReader: unexpected format (not 3 or 4 fields): {raw!r}")
             return
 
-        roll, pitch, yaw, accuracy = result
+        try:
+            rot = result["r"]
+            accel = result["a"]
+            gyro = result["w"]
+            accuracy = int(result.get("c", 0))
+            if not isinstance(rot, list) or len(rot) != 5:
+                raise ValueError("r vector invalid")
+            if not isinstance(accel, list) or len(accel) != 3:
+                raise ValueError("a vector invalid")
+            if not isinstance(gyro, list) or len(gyro) != 3:
+                raise ValueError("w vector invalid")
 
-        # Convert ENU yaw → compass bearing
-        bearing = _yaw_to_bearing_enu(yaw)
-        # Apply static magnetic-north alignment offset
-        bearing = (bearing + COMPASS_OFFSET_DEG) % 360.0
+            rot = [float(v) for v in rot]
+            accel = [float(v) for v in accel]
+            gyro = [float(v) for v in gyro]
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"ESP32IMUReader: malformed packet [{e}] raw={raw!r}")
+            return
+
+        qi, qj, qk, qr, _rot_acc = rot
+        yaw_rad = math.atan2(2.0 * (qr * qk + qi * qj), 1.0 - 2.0 * (qj * qj + qk * qk))
+        bearing = (90.0 - math.degrees(yaw_rad)) % 360.0
         cardinal = _bearing_to_cardinal(bearing)
 
         # accuracy = -1 means firmware does not report it; treat as uncalibrated
@@ -162,14 +162,14 @@ class ESP32IMUReader(threading.Thread):
         calibrated = eff_accuracy >= COMPASS_MIN_ACCURACY
 
         snap: dict = {
-            "accel":   {"x": 0.0, "y": 0.0, "z": 0.0},   # ESP32 serial does not send accel
-            "gyro":    {"x": roll,  "y": pitch, "z": yaw}, # repurpose for raw angles (deg)
+            "accel": {"x": accel[0], "y": accel[1], "z": accel[2]},
+            "gyro":  {"x": gyro[0], "y": gyro[1], "z": gyro[2]},
             "compass": {
                 "bearing":    bearing,
                 "cardinal":   cardinal,
                 "calibrated": calibrated,
                 "accuracy":   eff_accuracy,
-                "quat":       {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0},
+                "quat":       {"w": qr, "x": qi, "y": qj, "z": qk},
             },
             "ts": time.time(),
         }

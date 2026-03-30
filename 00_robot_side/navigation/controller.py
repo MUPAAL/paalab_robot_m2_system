@@ -218,7 +218,7 @@ class PurePursuitController:
         # Construct a temporary "virtual" waypoint for P2P calculation
         from dataclasses import replace
         lookahead_wp = replace(current_wp, lat=lookahead_lat, lon=lookahead_lon)
-
+        logger.debug(f"PurePursuitController: Lookahead point at ({lookahead_lat:.6f}, {lookahead_lon:.6f}), "f"distance to current WP: {dist_to_wp:.2f} m")
         return self._p2p.compute(robot_lat, robot_lon, robot_bearing, lookahead_wp, dt)
 
     def reset(self) -> None:
